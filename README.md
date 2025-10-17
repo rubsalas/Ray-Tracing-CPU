@@ -11,11 +11,11 @@ cd raytracer
 ## 2. Compilar y generar la imagen
 
 ´´´
-cargo run > image.ppm
+cargo run
 ´´´
 
 ## 3. Limpiar y recompilar
 
 ´´´
-cargo clean && cargo run > image.ppm
+cargo clean && cargo run
 ´´´

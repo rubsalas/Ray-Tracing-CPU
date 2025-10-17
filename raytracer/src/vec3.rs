@@ -1,4 +1,4 @@
-// vec3
+// src/vec3.rs
 
 use std::fmt;
 use std::ops::{
