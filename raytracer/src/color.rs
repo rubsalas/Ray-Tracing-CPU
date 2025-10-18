@@ -17,7 +17,7 @@ pub fn write_color_to<W: Write>(out: &mut W, pixel_color: Color) -> IoResult<()>
     let g = pixel_color.y;
     let b = pixel_color.z;
 
-    // Mapea [0,1] -> [0,255], como en el libro (usa 255.999 para que 1.0 llegue a 255).
+    // Mapea [0,1] -> [0,255] (usa 255.999 para que 1.0 llegue a 255).
     let rbyte = (255.999 * clamp(r, 0.0, 1.0)) as u32;
     let gbyte = (255.999 * clamp(g, 0.0, 1.0)) as u32;
     let bbyte = (255.999 * clamp(b, 0.0, 1.0)) as u32;

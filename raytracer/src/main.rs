@@ -1,102 +1,115 @@
-// src/main.rs
-
 mod vec3;
 mod color;
 mod ray;
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
-
-use vec3::{Vec3, Point3, Color, unit_vector};
+use vec3::{Vec3, Point3, Color, dot, unit_vector};
 use color::write_color_to;
 use ray::Ray;
 
+/// Intersección rayo–esfera (forma "half-b").
+/// Ecuación de la esfera: |O + t·d - C|^2 = R^2
+/// Sea oc = O - C.
+/// Expandiendo: (d·d) t^2 + 2(oc·d) t + (oc·oc - R^2) = 0
+///
+/// Definimos:
+///   a       = d·d
+///   half_b  = oc·d            (la mitad de "b" original)
+///   c       = oc·oc - R^2
+/// Entonces:
+///   discriminant = half_b^2 - a*c
+///
+/// Si discriminant < 0 → no hay raíces reales → no hay impacto.
+/// Si ≥ 0 → hay dos raíces; la más cercana es t = (-half_b - sqrt(discriminant)) / a
+///
+/// Devuelve Some(t) si hay impacto, o None si no. `t` es el parámetro sobre el rayo.
+fn hit_sphere(center: Point3, radius: f64, r: Ray) -> Option<f64> {
+    let oc = r.origin() - center;                 // O - C
+    let a = dot(r.direction(), r.direction());    // d·d
+    let half_b = dot(oc, r.direction());          // oc·d
+    let c = dot(oc, oc) - radius * radius;        // |oc|^2 - R^2
 
+    let discriminant = half_b * half_b - a * c;
+    if discriminant < 0.0 {
+        None
+    } else {
+        // Elegimos la raíz "más pequeña" (punto más cercano a la cámara)
+        let t = (-half_b - discriminant.sqrt()) / a;
+
+        Some(t)
+    }
+}
+
+/// Colorea por normal de superficie cuando hay impacto; si no, dibuja el cielo.
+///
+/// - Si el rayo golpea la esfera, calculamos la normal `n` en el punto de impacto:
+///     n = unit_vector(P(t) - C)
+///   Luego mapeamos de [-1,1] a [0,1] para visualizar la normal: 0.5*(n + 1).
+///
+/// - Si no hay impacto, usamos el gradiente de cielo del libro.
 fn ray_color(r: Ray) -> Color {
-    // Normaliza la dirección del rayo (para mapear el cielo por dirección)
-    let unit_direction = unit_vector(r.direction());
+    if let Some(t) = hit_sphere(Point3::new(0.0, 0.0, -1.0), 0.5, r) {
+        let hit_point = r.at(t);
+        let n = unit_vector(hit_point - Point3::new(0.0, 0.0, -1.0));
 
-    // 'a' va de 0..1 según el componente Y del rayo (de -1..1 a 0..1)
-    let a = 0.5 * (unit_direction.y + 1.0);
-    // Mezcla lineal: (1-a)*blanco + a*azul-cielo
+        // Remapeo [-1,1] → [0,1]:  0.5*(n + 1)
+        return 0.5 * Vec3::new(n.x + 1.0, n.y + 1.0, n.z + 1.0);
+    }
+
+    // Cielo (gradiente) si no hay impacto
+    let d = unit_vector(r.direction());
+    let a = 0.5 * (d.y + 1.0);
     (1.0 - a) * Vec3::new(1.0, 1.0, 1.0) + a * Vec3::new(0.5, 0.7, 1.0)
 }
 
 fn main() -> io::Result<()> {
-    // ------------------------------------------------------------------------
-    // Image
-    // ------------------------------------------------------------------------
+    // ---------------- Image ----------------
     let aspect_ratio: f64 = 16.0 / 9.0;
     let image_width: i32 = 400;
-
-    // Calcula el alto y garantiza que sea al menos 1 (igual que en C++).
     let mut image_height: i32 = (image_width as f64 / aspect_ratio) as i32;
-    if image_height < 1 {
-        image_height = 1;
-    }
+    if image_height < 1 { image_height = 1; }
 
-    // ------------------------------------------------------------------------
-    // Camera (pinhole)
-    // ------------------------------------------------------------------------
+    // ---------------- Camera ----------------
     let camera_center: Point3 = Vec3::new(0.0, 0.0, 0.0);
-
     let focal_length: f64 = 1.0;
     let viewport_height: f64 = 2.0;
     let viewport_width: f64 = viewport_height * (image_width as f64 / image_height as f64);
 
-    // Vectores a lo largo de los bordes del viewport (horizontal y vertical).
-    // v vertical apunta hacia abajo (y negativa) para que el origen (0,0) quede arriba-izq.
     let viewport_u: Vec3 = Vec3::new(viewport_width, 0.0, 0.0);
-    let viewport_v: Vec3 = Vec3::new(0.0, -viewport_height, 0.0);
+    let viewport_v: Vec3 = Vec3::new(0.0, -viewport_height, 0.0); // hacia abajo
 
-    // Deltas por píxel (horizontal y vertical).
     let pixel_delta_u: Vec3 = viewport_u / (image_width as f64);
     let pixel_delta_v: Vec3 = viewport_v / (image_height as f64);
 
-    // Ubicación de la esquina superior izquierda del viewport.
     let viewport_upper_left: Point3 =
         camera_center - Vec3::new(0.0, 0.0, focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0);
 
-    // Centro del píxel (0,0): esquina sup-izq + 0.5*(delta_u + delta_v)
     let pixel00_loc: Point3 = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
-    // ------------------------------------------------------------------------
-    // Render (a archivo) + progreso por stderr
-    // ------------------------------------------------------------------------
+    // -------------- Render a archivo --------------
     let file = File::create("image.ppm")?;
     let mut out = BufWriter::new(file);
 
-    // Encabezado PPM (P3)
     writeln!(out, "P3")?;
     writeln!(out, "{} {}", image_width, image_height)?;
     writeln!(out, "255")?;
 
     for j in 0..image_height {
-        // Progreso (stderr)
         eprint!("\rScanlines remaining: {} ", image_height - j);
         io::stderr().flush().ok();
 
         for i in 0..image_width {
-            // Centro del píxel (i,j)
-            let pixel_center: Point3 =
-                pixel00_loc + (i as f64) * pixel_delta_u + (j as f64) * pixel_delta_v;
-
-            // Dirección del rayo desde el centro de la cámara al centro del píxel
-            let ray_direction: Vec3 = pixel_center - camera_center;
-
-            // Rayo primario
+            let pixel_center = pixel00_loc + (i as f64) * pixel_delta_u + (j as f64) * pixel_delta_v;
+            let ray_direction = pixel_center - camera_center;
             let r = Ray::new(camera_center, ray_direction);
 
-            // Color del rayo
-            let pixel_color: Color = ray_color(r);
-
-            // Escribir "R G B\n" al archivo
+            let pixel_color = ray_color(r);
             write_color_to(&mut out, pixel_color)?;
         }
     }
 
     out.flush()?;
     eprintln!("\rDone.                 ");
-
     Ok(())
 }
