@@ -1,11 +1,12 @@
 //! `hittable` module
 //!
 //! Defines the intersection record [`HitRecord`] and the abstract surface
-//! interface [`Hittable`]. A *hittable* can be intersected by a
+//! interface [`Hittable`]. A hittable can be intersected by a
 //! [`Ray`](crate::rays::Ray) within `[t_min, t_max]`, reporting the closest hit
 //! (if any) by writing into a mutable [`HitRecord`].
 
 use crate::ray::Ray;
+use crate::interval::Interval;
 use crate::vec3::{dot, Point3, Vec3};
 
 /// Intersection data produced by a successful `hit`.
@@ -21,8 +22,8 @@ pub struct HitRecord {
     pub normal: Vec3,
     /// Ray parameter `t` at the hit.
     pub t: f64,
-    /// `true` if the intersection is on the *front face* (ray hits the outside
-    /// of the surface), `false` if it is on the *back face* (ray exits).
+    /// `true` if the intersection is on the front face (ray hits the outside
+    /// of the surface), `false` if it is on the back face (ray exits).
     pub front_face: bool,
 }
 
@@ -70,5 +71,5 @@ pub trait Hittable {
     /// - `ray_tmin`: lower bound for `t` (use a small epsilon like `1e-8`)
     /// - `ray_tmax`: upper bound for `t` (e.g., current closest hit distance)
     /// - `rec`: output record to be filled on success
-    fn hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64, rec: &mut HitRecord) -> bool;
+    fn hit(&self, r: &Ray, ray_t: &Interval, rec: &mut HitRecord) -> bool;
 }

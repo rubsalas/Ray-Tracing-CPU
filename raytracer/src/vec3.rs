@@ -34,7 +34,7 @@ impl Vec3 {
         self.length_squared().sqrt()
     }
 
-    // Métodos “asociados” para quien prefiera estilo Vec3::dot(a,b)
+    // Métodos asociados para quien prefiera estilo Vec3::dot(a,b)
     #[inline]
     pub fn dot(u: Self, v: Self) -> f64 {
         u.x * v.x + u.y * v.y + u.z * v.z

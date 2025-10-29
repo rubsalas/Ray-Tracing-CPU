@@ -2,11 +2,7 @@
 //!
 //! Minimal container for multiple [`Hittable`](crate::hittable::Hittable) objects.
 //! Reports the closest intersection in a parametric interval by iterating
-//! over all children, exactly like RTIOW §6.5.
-//!
-//! This mirrors the C++ `std::shared_ptr<hittable>` design by using
-//! [`Rc<dyn Hittable>`]. If you prefer thread-safe sharing, you can switch
-//! to `Arc<dyn Hittable + Send + Sync>` later with minimal changes.
+//! over all children.
 //!
 //! # Examples
 //! Build a world with one sphere and query a hit:
@@ -24,22 +20,14 @@
 //! let hit = world.hit(&r, 1e-8, f64::INFINITY, &mut rec);
 //! # let _ = hit;
 //! ```
-//!
-//! If your code already produces boxed hittables, use [`HittableList::add_boxed`]:
-//! ```rust,no_run
-//! # use crate::vec3::Point3;
-//! # use crate::sphere::Sphere;
-//! # use crate::hittable_list::HittableList;
-//! let mut world = HittableList::new();
-//! world.add_boxed(Box::new(Sphere::new(Point3::new(0.0,0.0,-1.0), 0.5)));
-//! ```
 
 use std::rc::Rc;
 
-use crate::hittable::{HitRecord, Hittable};
 use crate::ray::Ray;
+use crate::interval::Interval;
+use crate::hittable::{HitRecord, Hittable};
 
-/// Shared reference type for hittables, mirroring `shared_ptr<hittable>` in C++.
+/// Shared reference type for hittables
 pub type HittablePtr = Rc<dyn Hittable>;
 
 /// A collection of shared hittable objects.
@@ -93,22 +81,20 @@ impl HittableList {
 }
 
 impl Hittable for HittableList {
-    /// Finds the closest hit among all children in `[ray_tmin, ray_tmax]`.
-    ///
-    /// On success, writes the nearest hit into `rec` and returns `true`.
-    fn hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64, rec: &mut HitRecord) -> bool {
+    /// Finds the closest hit among all children within `ray_t`.
+    fn hit(&self, r: &Ray, ray_t: &Interval, rec: &mut HitRecord) -> bool {
         let mut temp_rec = HitRecord::default();
         let mut hit_anything = false;
-        let mut closest_so_far = ray_tmax;
+        let mut closest_so_far = ray_t.max;
 
         for obj in &self.objects {
-            if obj.hit(r, ray_tmin, closest_so_far, &mut temp_rec) {
+            let window = Interval::new(ray_t.min, closest_so_far);
+            if obj.hit(r, &window, &mut temp_rec) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
                 *rec = temp_rec;
             }
         }
-
         hit_anything
     }
 }

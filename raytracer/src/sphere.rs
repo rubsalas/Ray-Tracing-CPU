@@ -12,9 +12,10 @@
 //! - Normal is computed as `(p - center) / radius`, which is unit length for
 //!   `radius > 0`. For `radius == 0` the sphere degenerates and will not report hits.
 
-use crate::hittable::{HitRecord, Hittable};
 use crate::ray::Ray;
+use crate::interval::Interval;
 use crate::vec3::{dot, Point3, Vec3};
+use crate::hittable::{HitRecord, Hittable};
 
 /// Solid sphere defined by a `center` and a non-negative `radius`.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -53,47 +54,31 @@ impl Sphere {
 }
 
 impl Hittable for Sphere {
-    /// Ray–sphere intersection using the 6.2/6.3 simplification:
-    ///
-    /// Let `oc = center - r.origin()`, `a = |D|²`, `h = D·oc`, `c = |oc|² - r²`.
-    /// The discriminant is `Δ = h² - a·c`. For `Δ < 0` there is no hit.
-    /// Otherwise, candidate roots are `(h ± √Δ) / a`.
-    ///
-    /// The nearest root inside `[ray_tmin, ray_tmax]` is chosen; on success,
-    /// `rec.t`, `rec.p`, and `rec.normal` are filled and the function returns `true`.
-    fn hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64, rec: &mut HitRecord) -> bool {
-        // Degenerate sphere (radius == 0) never hits meaningfully.
-        if self.radius <= 0.0 {
-            return false;
-        }
+    /// Ray–sphere intersection (uses Interval and orients normal via set_face_normal).
+    fn hit(&self, r: &Ray, ray_t: &Interval, rec: &mut HitRecord) -> bool {
+        if self.radius <= 0.0 { return false; }
 
-        // oc = center - origin  (matches the book’s 6.2 form)
-        let oc: Vec3 = self.center - r.origin();
-
-        let a = r.direction().length_squared();                  // a = |D|^2
-        let h = dot(r.direction(), oc);                          // h = D · oc
-        let c = oc.length_squared() - self.radius * self.radius; // c = |oc|^2 - r^2
+        let oc = self.center - r.origin();
+        let a = r.direction().length_squared();
+        let h = dot(r.direction(), oc);
+        let c = oc.length_squared() - self.radius * self.radius;
 
         let discriminant = h * h - a * c;
-        if discriminant < 0.0 {
-            return false;
-        }
-
+        if discriminant < 0.0 { return false; }
         let sqrtd = discriminant.sqrt();
 
-        // Find the nearest root within the allowed range.
+        // Try the nearer root first.
         let mut root = (h - sqrtd) / a;
-        if root <= ray_tmin || ray_tmax <= root {
+        if !ray_t.surrounds(root) {
             root = (h + sqrtd) / a;
-            if root <= ray_tmin || ray_tmax <= root {
+            if !ray_t.surrounds(root) {
                 return false;
             }
         }
 
         rec.t = root;
         rec.p = r.at(rec.t);
-        
-        // Compute outward_normal and orient via set_face_normal
+
         let outward_normal = (rec.p - self.center) / self.radius;
         rec.set_face_normal(r, outward_normal);
 

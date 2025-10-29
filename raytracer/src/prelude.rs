@@ -69,3 +69,5 @@ pub use crate::sphere::Sphere;
 // containers / world lists
 pub use crate::hittable_list::{HittableList, HittablePtr};
 
+// intervals
+pub use crate::interval::Interval;

@@ -8,6 +8,8 @@ mod sphere;
 
 mod prelude;
 
+mod interval;
+
 // un único use que trae constantes, helpers y tipos:
 // (pi, infinity, degrees_to_radians, Vec3, Point3, Color, Ray,
 //  write_color_to, Hittable, HitRecord, Sphere, HittableList, HittablePtr, etc.)
@@ -16,14 +18,12 @@ use crate::prelude::*;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
-
-
 /// Background + surface color
 /// - Si hay hit: 0.5 * (normal + (1,1,1))  → normal en [0,1].
 /// - Si no hay hit: gradiente vertical (blanco → azul).
 fn ray_color(r: &Ray, world: &impl Hittable) -> Color {
     let mut rec = HitRecord::default();
-    if world.hit(r, 0.0, INFINITY, &mut rec) {
+    if world.hit(r, &Interval::new(0.0, INFINITY), &mut rec) {
         // 0.5 * (n + 1)
         return 0.5 * (rec.normal + Color::new(1.0, 1.0, 1.0));
     }
@@ -52,7 +52,7 @@ fn main() -> io::Result<()> {
     world.add(std::rc::Rc::new(Sphere::new(Point3::new(0.0, -100.5, -1.0), 100.0)) as HittablePtr);
 
     // -------------
-    // Camera (pinhole simple)
+    // Camera (pinhole)
     // -------------
     let focal_length = 1.0;
     let viewport_height = 2.0;
