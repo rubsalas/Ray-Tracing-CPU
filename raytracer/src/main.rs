@@ -2,6 +2,13 @@ mod vec3;
 mod color;
 mod ray;
 
+mod hittable;
+mod sphere;
+mod hittable_list;
+
+use sphere::Sphere;
+use hittable_list::{HittableList, HittablePtr};
+
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use vec3::{Vec3, Point3, Color, dot, unit_vector};
@@ -25,19 +32,20 @@ use ray::Ray;
 ///
 /// Devuelve Some(t) si hay impacto, o None si no. `t` es el parámetro sobre el rayo.
 fn hit_sphere(center: Point3, radius: f64, r: Ray) -> Option<f64> {
-    let oc = r.origin() - center;                 // O - C
-    let a = dot(r.direction(), r.direction());    // d·d
-    let half_b = dot(oc, r.direction());          // oc·d
-    let c = dot(oc, oc) - radius * radius;        // |oc|^2 - R^2
+    // oc = center - origin
+    let oc = center - r.origin();
 
-    let discriminant = half_b * half_b - a * c;
+    // Forma simplificada
+    let a = r.direction().length_squared();           // a = |d|^2
+    let h = dot(r.direction(), oc);                   // h = d · oc
+    let c = oc.length_squared() - radius * radius;    // c = |oc|^2 - r^2
+
+    let discriminant = h * h - a * c;
     if discriminant < 0.0 {
         None
     } else {
-        // Elegimos la raíz "más pequeña" (punto más cercano a la cámara)
-        let t = (-half_b - discriminant.sqrt()) / a;
-
-        Some(t)
+        // t más cercano hacia adelante
+        Some((h - discriminant.sqrt()) / a)
     }
 }
 
