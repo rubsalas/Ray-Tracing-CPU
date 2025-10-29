@@ -1,7 +1,7 @@
 //! `hittable_list` module
 //!
 //! Minimal container for multiple [`Hittable`](crate::hittable::Hittable) objects.
-//! Reports the **closest** intersection in a parametric interval by iterating
+//! Reports the closest intersection in a parametric interval by iterating
 //! over all children, exactly like RTIOW §6.5.
 //!
 //! This mirrors the C++ `std::shared_ptr<hittable>` design by using
@@ -37,7 +37,7 @@
 use std::rc::Rc;
 
 use crate::hittable::{HitRecord, Hittable};
-use crate::rays::Ray;
+use crate::ray::Ray;
 
 /// Shared reference type for hittables, mirroring `shared_ptr<hittable>` in C++.
 pub type HittablePtr = Rc<dyn Hittable>;
@@ -93,7 +93,7 @@ impl HittableList {
 }
 
 impl Hittable for HittableList {
-    /// Finds the **closest** hit among all children in `[ray_tmin, ray_tmax]`.
+    /// Finds the closest hit among all children in `[ray_tmin, ray_tmax]`.
     ///
     /// On success, writes the nearest hit into `rec` and returns `true`.
     fn hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64, rec: &mut HitRecord) -> bool {

@@ -13,7 +13,7 @@
 //!   `radius > 0`. For `radius == 0` the sphere degenerates and will not report hits.
 
 use crate::hittable::{HitRecord, Hittable};
-use crate::rays::Ray;
+use crate::ray::Ray;
 use crate::vec3::{dot, Point3, Vec3};
 
 /// Solid sphere defined by a `center` and a non-negative `radius`.
@@ -70,8 +70,8 @@ impl Hittable for Sphere {
         // oc = center - origin  (matches the book’s 6.2 form)
         let oc: Vec3 = self.center - r.origin();
 
-        let a = r.direction().length_squared();                 // a = |D|^2
-        let h = dot(r.direction(), oc);                         // h = D · oc
+        let a = r.direction().length_squared();                  // a = |D|^2
+        let h = dot(r.direction(), oc);                          // h = D · oc
         let c = oc.length_squared() - self.radius * self.radius; // c = |oc|^2 - r^2
 
         let discriminant = h * h - a * c;
