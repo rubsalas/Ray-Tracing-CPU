@@ -74,6 +74,19 @@ impl Interval {
         self.min < x && x < self.max
     }
 
+    /// Clamps `x` to this interval: returns `min` if `x < min`,
+    /// `max` if `x > max`, otherwise returns `x`.
+    #[inline]
+    pub fn clamp(&self, x: f64) -> f64 {
+        if x < self.min {
+            self.min
+        } else if x > self.max {
+            self.max
+        } else {
+            x
+        }
+    }
+
     /// Predefined empty interval: `(min=+∞, max=-∞)`.
     pub const EMPTY: Self = Self {
         min: f64::INFINITY,
