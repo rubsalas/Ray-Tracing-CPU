@@ -10,6 +10,7 @@
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
+use rand::{distributions::Uniform, Rng};
 
 #[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub struct Vec3 {
@@ -34,6 +35,24 @@ impl Vec3 {
         self.length_squared().sqrt()
     }
 
+    /// Returns a vector with each component sampled uniformly in [0.0, 1.0).
+    #[inline]
+    pub fn random() -> Self {
+        Self::new(
+            rand::random::<f64>(),
+            rand::random::<f64>(),
+            rand::random::<f64>(),
+        )
+    }
+
+    /// Returns a vector with each component sampled uniformly in [min, max).
+    #[inline]
+    pub fn random_range(min: f64, max: f64) -> Self {
+        let mut rng = rand::thread_rng();
+        let dist = Uniform::new(min, max);
+        Self::new(rng.sample(dist), rng.sample(dist), rng.sample(dist))
+    }
+
     // Métodos asociados para quien prefiera estilo Vec3::dot(a,b)
     #[inline]
     pub fn dot(u: Self, v: Self) -> f64 {
@@ -53,6 +72,38 @@ impl Vec3 {
     pub fn unit_vector(v: Self) -> Self {
         let len = v.length();
         if len == 0.0 { v } else { v / len }
+    }
+
+    /// Samples a uniform random unit vector on the surface of the unit sphere.
+    ///
+    /// Rejection-samples a point `p` in the unit ball and normalizes it.
+    /// Uses an epsilon to avoid dividing by ~0 when `p` is extremely small.
+    ///
+    /// - Draw `p ~ U([-1,1]^3)`
+    /// - If `1e-160 < |p|^2 <= 1`, return `p / |p|`
+    #[inline]
+    pub fn random_unit_vector() -> Self {
+        loop {
+            let p = Self::random_range(-1.0, 1.0);
+            let lensq = p.length_squared();
+            if lensq > 1e-160 && lensq <= 1.0 {
+                return p / lensq.sqrt();
+            }
+        }
+    }
+
+    /// Samples a random unit vector on the hemisphere defined by `normal`.
+    ///
+    /// Draws a uniform random direction on the unit sphere and flips it if
+    /// it falls on the opposite hemisphere relative to `normal`.
+    #[inline]
+    pub fn random_on_hemisphere(normal: Vec3) -> Self {
+        let on_unit_sphere = Self::random_unit_vector();
+        if dot(on_unit_sphere, normal) > 0.0 {
+            on_unit_sphere // same hemisphere as `normal`
+        } else {
+            -on_unit_sphere // flip to match hemisphere
+        }
     }
 }
 

@@ -22,6 +22,8 @@ pub struct Camera {
     pub aspect_ratio: f64,
     /// Number of random samples per pixel.
     pub samples_per_pixel: i32,
+    /// Maximum number of ray bounces into scene
+    pub max_depth: i32,
 
     // --- Derived / private state (filled by initialize) ---
     image_height: i32,
@@ -39,6 +41,7 @@ impl Default for Camera {
             aspect_ratio: 1.0,
             samples_per_pixel: 10,
             image_height: 0,
+            max_depth: 10,
             pixel_samples_scale: 0.0,
             center: Point3::new(0.0, 0.0, 0.0),
             pixel00_loc: Point3::new(0.0, 0.0, 0.0),
@@ -76,7 +79,7 @@ impl Camera {
                 let mut pixel_color = Color::new(0.0, 0.0, 0.0);
                 for _s in 0..self.samples_per_pixel {
                     let r = self.get_ray(i, j);
-                    pixel_color += self.ray_color(&r, world);
+                    pixel_color += self.ray_color(&r, self.max_depth, world); // CHANGED FOR DEPTH
                 }
                 // Scale by 1/spp before writing (gamma comes later)
                 write_color_to(out, self.pixel_samples_scale * pixel_color)?;
@@ -121,7 +124,7 @@ impl Camera {
         self.pixel00_loc = viewport_upper_left + 0.5 * (self.pixel_delta_u + self.pixel_delta_v);
     }
 
-    /// Constructs a ray through a **randomly jittered** point around pixel `(i, j)`.
+    /// Constructs a ray through a randomly jittered point around pixel `(i, j)`.
     ///
     /// Matches the intent of `get_ray` in Listing 45: sample inside the unit
     /// square around the pixel center via [`sample_square`], convert that to
@@ -143,12 +146,20 @@ impl Camera {
         Vec3::new(random_double() - 0.5, random_double() - 0.5, 0.0)
     }
 
-    /// Background and surface-normal shading, using `Interval` for ray `t` range.
-    fn ray_color(&self, r: &Ray, world: &impl Hittable) -> Color {
-        let mut rec = HitRecord::default();
-        if world.hit(r, &Interval::new(0.0, INFINITY), &mut rec) {
-            return 0.5 * (rec.normal + Color::new(1.0, 1.0, 1.0));
+    /// Diffuse bounce with max recursion depth.
+    fn ray_color(&self, r: &Ray, depth: i32, world: &impl Hittable) -> Color {
+        // If we've exceeded the ray bounce limit, no light is returned.
+        if depth <= 0 {
+            return Color::new(0.0, 0.0, 0.0);
         }
+
+        let mut rec = HitRecord::default();
+        if world.hit(r, &Interval::new(0.001, INFINITY), &mut rec) {
+            let direction = Vec3::random_on_hemisphere(rec.normal);
+            return 0.5 * self.ray_color(&Ray::new(rec.p, direction), depth - 1, world);
+        }
+
+        // Background gradient
         let unit_direction = unit_vector(r.direction());
         let a = 0.5 * (unit_direction.y + 1.0);
         (1.0 - a) * Color::new(1.0, 1.0, 1.0) + a * Color::new(0.5, 0.7, 1.0)

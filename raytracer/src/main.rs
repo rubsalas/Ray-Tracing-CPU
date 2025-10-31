@@ -20,11 +20,12 @@ fn main() -> IoResult<()> {
     world.add(std::rc::Rc::new(Sphere::new(Point3::new(0.0, -100.5, -1.0), 100.0)) as HittablePtr);
 
     // Camera
-    let mut cam = Camera::new(720, 16.0 / 9.0);
+    let mut cam = Camera::new(400, 16.0 / 9.0);
     cam.samples_per_pixel = 100;
+    cam.max_depth = 50;
 
     // Output
-    let file = File::create("image_antialiasing3.ppm")?;
+    let file = File::create("image9.ppm")?;
     let mut out = BufWriter::new(file);
 
     // Render
