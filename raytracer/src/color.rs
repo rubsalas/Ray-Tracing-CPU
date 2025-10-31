@@ -1,42 +1,48 @@
-//! `color` module — Listing 44 port
+//! `color` module — Listing 57 (gamma 2.0)
 //!
-//! Formats linear RGB colors as ASCII PPM (`P3`) lines. This version follows
-//! RTIOW Listing 44 by clamping each channel with an [`Interval`] of
-//! `[0.000, 0.999]` and mapping with `int(256 * value)`.
-//!
-//! A color is represented by the alias [`Color`] (equals [`Vec3`](crate::vec3::Vec3)):
-//! `x=r`, `y=g`, `z=b`.
+//! Formats linear RGB colors as ASCII PPM (`P3`) lines. This version applies a
+//! linear to gamma transform with gamma = 2.0 (`sqrt`) before clamping and
+//! quantizing to 8-bit.
 
 use std::io::{Result as IoResult, Write};
 
 use crate::interval::Interval;
 use crate::vec3::Color;
 
+/// Linear to gamma mapping for gamma = 2.0.
+///
+/// Returns `sqrt(linear_component)` for positive inputs, otherwise `0.0`.
+#[inline]
+pub fn linear_to_gamma(linear_component: f64) -> f64 {
+    if linear_component > 0.0 {
+        linear_component.sqrt()
+    } else {
+        0.0
+    }
+}
+
 /// Writes `"R G B\n"` to any `Write` sink (file, buffer, stdout) in ASCII PPM style.
 ///
-/// Each channel is assumed **linear** in `[0.0, 1.0]`. Per Listing 44,
-/// values are clamped to `[0.000, 0.999]` and converted with `int(256 * value)`
-/// so that the top code point never rounds up to 256.
-///
-/// # Errors
-/// Propagates any I/O error from the underlying writer.
-///
-/// # Example
-/// ```rust,no_run
-/// # use crate::vec3::Vec3;
-/// # use crate::color::write_color_to;
-/// let mut out = Vec::new();
-/// write_color_to(&mut out, Vec3::new(0.0, 0.5, 1.0)).unwrap();
-/// assert_eq!(std::str::from_utf8(&out).unwrap(), "0 128 255\n");
-/// ```
+/// Steps:
+/// 1) Read linear RGB (expected in `[0, 1]` per channel).
+/// 2) Apply gamma-2.0 correction via [`linear_to_gamma`].
+/// 3) Clamp each channel to `[0.000, 0.999]`.
+/// 4) Map to bytes using `int(256 * value)`.
 pub fn write_color_to<W: Write>(out: &mut W, pixel_color: Color) -> IoResult<()> {
-    let r = pixel_color.x;
-    let g = pixel_color.y;
-    let b = pixel_color.z;
+    // 1) Linear RGB in [0,1]
+    let mut r = pixel_color.x;
+    let mut g = pixel_color.y;
+    let mut b = pixel_color.z;
 
-    // Listing 44: clamp to [0.000, 0.999] then scale by 256.
+    // 2) Gamma 2.0
+    r = linear_to_gamma(r);
+    g = linear_to_gamma(g);
+    b = linear_to_gamma(b);
+
+    // 3) Clamp to [0.000, 0.999]
     let intensity = Interval::new(0.0, 0.999);
 
+    // 4) Quantize to bytes with int(256 * value)
     let rbyte = (256.0 * intensity.clamp(r)) as u32;
     let gbyte = (256.0 * intensity.clamp(g)) as u32;
     let bbyte = (256.0 * intensity.clamp(b)) as u32;

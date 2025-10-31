@@ -25,7 +25,7 @@ fn main() -> IoResult<()> {
     cam.max_depth = 50;
 
     // Output
-    let file = File::create("image9.ppm")?;
+    let file = File::create("image.ppm")?;
     let mut out = BufWriter::new(file);
 
     // Render

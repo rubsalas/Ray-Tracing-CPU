@@ -154,9 +154,13 @@ impl Camera {
         }
 
         let mut rec = HitRecord::default();
+        
+        // NOTE: 0.001 to avoid "shadow acne" (self-intersections).
         if world.hit(r, &Interval::new(0.001, INFINITY), &mut rec) {
-            let direction = Vec3::random_on_hemisphere(rec.normal);
-            return 0.5 * self.ray_color(&Ray::new(rec.p, direction), depth - 1, world);
+            // Cosine-ish diffuse — jitter around the normal
+            let direction = rec.normal + Vec3::random_unit_vector();
+            // % reflectance
+            return 0.90 * self.ray_color(&Ray::new(rec.p, direction), depth - 1, world);
         }
 
         // Background gradient
