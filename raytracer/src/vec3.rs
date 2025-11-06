@@ -35,6 +35,15 @@ impl Vec3 {
         self.length_squared().sqrt()
     }
 
+    /// Returns `true` if the vector is close to zero in all components.
+    ///
+    /// Uses an absolute epsilon of `1e-8` on each axis.
+    #[inline]
+    pub fn near_zero(&self) -> bool {
+        let s = 1e-8;
+        self.x.abs() < s && self.y.abs() < s && self.z.abs() < s
+    }
+
     /// Returns a vector with each component sampled uniformly in [0.0, 1.0).
     #[inline]
     pub fn random() -> Self {
@@ -105,6 +114,27 @@ impl Vec3 {
             -on_unit_sphere // flip to match hemisphere
         }
     }
+    
+    /// Reflects a vector `v` about a surface normal `n`.
+    ///
+    /// Formula: `v - 2 * dot(v, n) * n`
+    ///
+    /// Assumes `n` is a unit vector for correct geometric reflection.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use crate::vec3::{Vec3, reflect, unit_vector, dot};
+    /// let v = Vec3::new(1.0, -1.0, 0.0);
+    /// let n = unit_vector(Vec3::new(0.0, 1.0, 0.0)); // y-up
+    /// let r = reflect(v, n);
+    /// // r should be (1, 1, 0)
+    /// assert!((r.x - 1.0).abs() < 1e-12 && (r.y - 1.0).abs() < 1e-12 && (r.z).abs() < 1e-12);
+    /// ```
+    #[inline]
+    pub fn reflect(v: Vec3, n: Vec3) -> Vec3 {
+        v - 2.0 * dot(v, n) * n
+    }
+
 }
 
 // -------- Indexación: v[i] <-> x/y/z --------

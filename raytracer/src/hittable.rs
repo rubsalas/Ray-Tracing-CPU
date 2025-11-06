@@ -7,13 +7,14 @@
 
 use crate::ray::Ray;
 use crate::interval::Interval;
+use crate::material::MaterialPtr;
 use crate::vec3::{dot, Point3, Vec3};
 
 /// Intersection data produced by a successful `hit`.
 ///
 /// Implementations fill this record when an intersection closer than any
 /// previous one is found in the range `[ray_tmin, ray_tmax]`.
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Clone)]
 pub struct HitRecord {
     /// World-space hit point `p = ray.origin + t * ray.direction`.
     pub p: Point3,
@@ -23,8 +24,22 @@ pub struct HitRecord {
     /// Ray parameter `t` at the hit.
     pub t: f64,
     /// `true` if the intersection is on the front face (ray hits the outside
-    /// of the surface), `false` if it is on the back face (ray exits).
+    /// of the surface), `false` if it is on the   back face (ray exits).
     pub front_face: bool,
+    /// Material at the hit point. `None` before being filled by the shape.
+    pub mat: Option<MaterialPtr>,
+}
+
+impl Default for HitRecord {
+    fn default() -> Self {
+        Self {
+            p: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(0.0, 0.0, 0.0),
+            t: 0.0,
+            front_face: false,
+            mat: None,
+        }
+    }
 }
 
 impl HitRecord {

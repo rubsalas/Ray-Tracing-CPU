@@ -81,7 +81,6 @@ impl HittableList {
 }
 
 impl Hittable for HittableList {
-    /// Finds the closest hit among all children within `ray_t`.
     fn hit(&self, r: &Ray, ray_t: &Interval, rec: &mut HitRecord) -> bool {
         let mut temp_rec = HitRecord::default();
         let mut hit_anything = false;
@@ -92,7 +91,7 @@ impl Hittable for HittableList {
             if obj.hit(r, &window, &mut temp_rec) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
-                *rec = temp_rec;
+                rec.clone_from(&temp_rec); // ≈ *rec = temp_rec.clone();
             }
         }
         hit_anything

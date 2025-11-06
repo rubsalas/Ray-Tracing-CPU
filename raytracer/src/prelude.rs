@@ -88,3 +88,6 @@ pub use crate::hittable_list::{HittableList, HittablePtr};
 
 // intervals
 pub use crate::interval::Interval;
+
+// material
+pub use crate::material::{Material, MaterialPtr, Lambertian, Metal};

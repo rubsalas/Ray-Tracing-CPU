@@ -14,29 +14,26 @@
 
 use crate::ray::Ray;
 use crate::interval::Interval;
+use crate::material::MaterialPtr;
 use crate::vec3::{dot, Point3, Vec3};
 use crate::hittable::{HitRecord, Hittable};
 
 /// Solid sphere defined by a `center` and a non-negative `radius`.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Sphere {
     center: Point3,
     radius: f64,
+    mat: MaterialPtr,            // NEW: shared pointer to material
 }
 
+
 impl Sphere {
-    /// Creates a new sphere; negative radii are clamped to zero.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// # use crate::vec3::Point3;
-    /// # use crate::sphere::Sphere;
-    /// let s = Sphere::new(Point3::new(0.0, 0.0, -1.0), 0.5);
-    /// ```
-    pub fn new(center: Point3, radius: f64) -> Self {
+    /// Creates a sphere with center, non-negative radius, and a material.
+    pub fn new(center: Point3, radius: f64, mat: MaterialPtr) -> Self {
         Self {
             center,
             radius: radius.max(0.0),
+            mat,
         }
     }
 
@@ -54,10 +51,10 @@ impl Sphere {
 }
 
 impl Hittable for Sphere {
-    /// Ray–sphere intersection (uses Interval and orients normal via set_face_normal).
     fn hit(&self, r: &Ray, ray_t: &Interval, rec: &mut HitRecord) -> bool {
         if self.radius <= 0.0 { return false; }
 
+        // Ray-sphere (with "h" trick) as before
         let oc = self.center - r.origin();
         let a = r.direction().length_squared();
         let h = dot(r.direction(), oc);
@@ -67,7 +64,7 @@ impl Hittable for Sphere {
         if discriminant < 0.0 { return false; }
         let sqrtd = discriminant.sqrt();
 
-        // Try the nearer root first.
+        // Nearest root in the allowed interval
         let mut root = (h - sqrtd) / a;
         if !ray_t.surrounds(root) {
             root = (h + sqrtd) / a;
@@ -81,6 +78,9 @@ impl Hittable for Sphere {
 
         let outward_normal = (rec.p - self.center) / self.radius;
         rec.set_face_normal(r, outward_normal);
+
+        // NEW: attach material to the hit record
+        rec.mat = Some(self.mat.clone());
 
         true
     }

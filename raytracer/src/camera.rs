@@ -61,7 +61,7 @@ impl Camera {
         }
     }
 
-    /// Renders `world` to a PPM stream (`P3`) with multi-sampling (Listing 45).
+    /// Renders `world` to a PPM stream (`P3`) with multi-sampling.
     pub fn render<W: Write>(&mut self, world: &impl Hittable, out: &mut W) -> IoResult<()> {
         self.initialize();
 
@@ -79,9 +79,9 @@ impl Camera {
                 let mut pixel_color = Color::new(0.0, 0.0, 0.0);
                 for _s in 0..self.samples_per_pixel {
                     let r = self.get_ray(i, j);
-                    pixel_color += self.ray_color(&r, self.max_depth, world); // CHANGED FOR DEPTH
+                    pixel_color += self.ray_color(&r, self.max_depth, world);
                 }
-                // Scale by 1/spp before writing (gamma comes later)
+                // Scale by 1/spp before writing
                 write_color_to(out, self.pixel_samples_scale * pixel_color)?;
             }
         }
@@ -124,6 +124,12 @@ impl Camera {
         self.pixel00_loc = viewport_upper_left + 0.5 * (self.pixel_delta_u + self.pixel_delta_v);
     }
 
+    /// Returns a random offset inside the unit square centered at the pixel: [-0.5, +0.5]^2 (z=0).
+    #[inline]
+    fn sample_square(&self) -> Vec3 {
+        Vec3::new(random_double() - 0.5, random_double() - 0.5, 0.0)
+    }
+
     /// Constructs a ray through a randomly jittered point around pixel `(i, j)`.
     ///
     /// Matches the intent of `get_ray` in Listing 45: sample inside the unit
@@ -140,29 +146,27 @@ impl Camera {
         Ray::new(ray_origin, ray_direction)
     }
 
-    /// Returns a random offset vector within the unit square centered at the pixel:
-    /// `[-0.5, -0.5]` to `[+0.5, +0.5]` (z=0).
-    fn sample_square(&self) -> Vec3 {
-        Vec3::new(random_double() - 0.5, random_double() - 0.5, 0.0)
-    }
-
-    /// Diffuse bounce with max recursion depth.
     fn ray_color(&self, r: &Ray, depth: i32, world: &impl Hittable) -> Color {
-        // If we've exceeded the ray bounce limit, no light is returned.
+        // If we've exceeded the ray bounce limit, no more light is gathered.
         if depth <= 0 {
             return Color::new(0.0, 0.0, 0.0);
         }
-
+    
         let mut rec = HitRecord::default();
-        
-        // NOTE: 0.001 to avoid "shadow acne" (self-intersections).
+    
         if world.hit(r, &Interval::new(0.001, INFINITY), &mut rec) {
-            // Cosine-ish diffuse — jitter around the normal
-            let direction = rec.normal + Vec3::random_unit_vector();
-            // % reflectance
-            return 0.90 * self.ray_color(&Ray::new(rec.p, direction), depth - 1, world);
+            if let Some(mat) = &rec.mat {
+                let mut scattered = Ray::new(rec.p, Vec3::new(0.0, 0.0, 0.0)); // will be overwritten by scatter
+                let mut attenuation = Color::new(0.0, 0.0, 0.0);
+    
+                if mat.scatter(r, &rec, &mut attenuation, &mut scattered) {
+                    return attenuation * self.ray_color(&scattered, depth - 1, world);
+                }
+            }
+            // Absorbed (no scatter or missing material)
+            return Color::new(0.0, 0.0, 0.0);
         }
-
+    
         // Background gradient
         let unit_direction = unit_vector(r.direction());
         let a = 0.5 * (unit_direction.y + 1.0);
