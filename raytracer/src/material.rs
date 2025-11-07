@@ -84,29 +84,31 @@ impl Material for Lambertian {
     }
 }
 
-/// Perfect specular metal — Listing 65
+/// Rough (fuzzy) metal
 ///
-/// Reflects the incoming direction about the surface normal and continues
-/// tracing with that reflected ray. Attenuation equals the material `albedo`.
+/// Perfect specular reflection when `fuzz == 0`.
+/// As `fuzz` increases toward 1, the reflection direction is randomized by
+/// adding `fuzz * random_unit_vector()` (a unit vector noise).
 #[derive(Clone, Debug)]
 pub struct Metal {
     albedo: Color,
+    fuzz: f64, // clamped to [0, 1]
 }
 
 impl Metal {
-    /// Creates a perfect-mirror metal with the given `albedo`.
+    /// Creates a metal with `albedo` and surface roughness `fuzz` in [0, 1].
     #[inline]
-    pub fn new(albedo: Color) -> Self {
-        Self { albedo }
+    pub fn new(albedo: Color, fuzz: f64) -> Self {
+        Self {
+            albedo,
+            fuzz: fuzz.clamp(0.0, 1.0), // mimic fuzz < 1 ? fuzz : 1
+        }
     }
 }
 
 impl Material for Metal {
-    /// Scatter as a perfect reflection about the hit normal.
-    ///
-    /// - `scattered.origin = rec.p`
-    /// - `scattered.direction = reflect(r_in.direction(), rec.normal)`
-    /// - `attenuation = albedo`
+    /// Reflect about the normal, then add fuzzy noise, and accept only if
+    /// the scattered ray still goes outward (`dot(dir, normal) > 0`).
     fn scatter(
         &self,
         r_in: &Ray,
@@ -114,9 +116,13 @@ impl Material for Metal {
         attenuation: &mut Color,
         scattered: &mut Ray,
     ) -> bool {
-        let reflected = Vec3::reflect(r_in.direction(), rec.normal);
+        let mut reflected = Vec3::reflect(r_in.direction(), rec.normal);
+        // Listing 69: normalize reflected, then add fuzz * random_unit_vector()
+        reflected = unit_vector(reflected) + self.fuzz * Vec3::random_unit_vector();
+
         *scattered = Ray::new(rec.p, reflected);
         *attenuation = self.albedo;
-        true
+
+        dot(scattered.direction(), rec.normal) > 0.0
     }
 }
