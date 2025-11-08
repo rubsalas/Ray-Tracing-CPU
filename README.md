@@ -1,21 +1,34 @@
 # Ray-Tracing-CPU
 CE1114 – Proyecto de Aplicación de la Ingeniería en Computadores
 
-## 1. Crear proyecto
+## Requisitos
 
+* Rust y Cargo
+
+´´´bash
+rustup default stable
+rustc --version
+cargo --version
 ´´´
-cargo new raytracer
+
+## Clonar y ejecutar
+
+### 1. Clonar el repositorio
+´´´bash
+git clone https://github.com/rubsalas/Ray-Tracing-CPU
+cd Ray-Tracing-CPU
 cd raytracer
 ´´´
 
-## 2. Compilar y generar la imagen
-
+### 2. Compilar
+´´´bash
+cargo build
 ´´´
+
+### 3. Ejecutar
+´´´bash
 cargo run
 ´´´
 
-## 3. Limpiar y recompilar
+Por defecto el programa generará un archivo image.ppm en la carpeta raíz del proyecto.
 
-´´´
-cargo clean && cargo run
-´´´
