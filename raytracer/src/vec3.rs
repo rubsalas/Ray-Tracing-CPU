@@ -114,26 +114,6 @@ impl Vec3 {
             -on_unit_sphere // flip to match hemisphere
         }
     }
-    
-    /// Reflects a vector `v` about a surface normal `n`.
-    ///
-    /// Formula: `v - 2 * dot(v, n) * n`
-    ///
-    /// Assumes `n` is a unit vector for correct geometric reflection.
-    ///
-    /// # Example
-    /// ```rust
-    /// # use crate::vec3::{Vec3, reflect, unit_vector, dot};
-    /// let v = Vec3::new(1.0, -1.0, 0.0);
-    /// let n = unit_vector(Vec3::new(0.0, 1.0, 0.0)); // y-up
-    /// let r = reflect(v, n);
-    /// // r should be (1, 1, 0)
-    /// assert!((r.x - 1.0).abs() < 1e-12 && (r.y - 1.0).abs() < 1e-12 && (r.z).abs() < 1e-12);
-    /// ```
-    #[inline]
-    pub fn reflect(v: Vec3, n: Vec3) -> Vec3 {
-        v - 2.0 * dot(v, n) * n
-    }
 
 }
 
@@ -235,6 +215,50 @@ impl DivAssign<f64> for Vec3 {
 #[inline] pub fn dot(u: Vec3, v: Vec3) -> f64 { Vec3::dot(u, v) }
 #[inline] pub fn cross(u: Vec3, v: Vec3) -> Vec3 { Vec3::cross(u, v) }
 #[inline] pub fn unit_vector(v: Vec3) -> Vec3 { Vec3::unit_vector(v) }
+
+/// Reflects a vector `v` about a surface normal `n`.
+///
+/// Formula: `v - 2 * dot(v, n) * n`
+///
+/// Assumes `n` is a unit vector for correct geometric reflection.
+///
+/// # Example
+/// ```rust
+/// # use crate::vec3::{Vec3, reflect, unit_vector, dot};
+/// let v = Vec3::new(1.0, -1.0, 0.0);
+/// let n = unit_vector(Vec3::new(0.0, 1.0, 0.0)); // y-up
+/// let r = reflect(v, n);
+/// // r should be (1, 1, 0)
+/// assert!((r.x - 1.0).abs() < 1e-12 && (r.y - 1.0).abs() < 1e-12 && (r.z).abs() < 1e-12);
+/// ```
+#[inline]
+pub fn reflect(v: Vec3, n: Vec3) -> Vec3 {
+    v - 2.0 * dot(v, n) * n
+}
+
+/// Refracts an incoming unit direction `uv` through a surface with normal `n`
+/// using Snell's law. `etai_over_etat` is the ratio ηᵢ/ηₜ (from incident to transmitted).
+///
+/// Assumes:
+/// - `uv` is unit-length (normalize before calling).
+/// - `n` is a unit normal, oriented to face the incident ray.
+///
+/// Formula:
+/// ```text
+/// cos_theta      = min(dot(-uv, n), 1)
+/// r_out_perp     = etai_over_etat * (uv + cos_theta * n)
+/// r_out_parallel = -sqrt(|1 - |r_out_perp|^2|) * n
+/// refracted      = r_out_perp + r_out_parallel
+/// ```
+///
+/// Returns the refracted direction (not necessarily normalized, but typically close).
+#[inline]
+pub fn refract(uv: Vec3, n: Vec3, etai_over_etat: f64) -> Vec3 {
+    let cos_theta = f64::min(dot(-uv, n), 1.0);
+    let r_out_perp = etai_over_etat * (uv + cos_theta * n);
+    let r_out_parallel = -((1.0 - r_out_perp.length_squared()).abs().sqrt()) * n;
+    r_out_perp + r_out_parallel
+}
 
 // -------- Alias semánticos --------
 pub type Point3 = Vec3; // puntos 3D

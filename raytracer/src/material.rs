@@ -9,7 +9,6 @@ use std::rc::Rc;
 
 use crate::ray::Ray;
 use crate::prelude::*;
-use crate::vec3::{Color, Vec3};
 use crate::hittable::HitRecord;
 
 /// Trait for shading and scattering behavior at surface hits.
@@ -116,7 +115,7 @@ impl Material for Metal {
         attenuation: &mut Color,
         scattered: &mut Ray,
     ) -> bool {
-        let mut reflected = Vec3::reflect(r_in.direction(), rec.normal);
+        let mut reflected = reflect(r_in.direction(), rec.normal);
         // Listing 69: normalize reflected, then add fuzz * random_unit_vector()
         reflected = unit_vector(reflected) + self.fuzz * Vec3::random_unit_vector();
 
@@ -124,5 +123,64 @@ impl Material for Metal {
         *attenuation = self.albedo;
 
         dot(scattered.direction(), rec.normal) > 0.0
+    }
+}
+
+/// Dielectric (full glass)
+///
+/// Uses Snell refraction, total internal reflection, and Schlick's
+/// approximation to choose between reflection and refraction.
+#[derive(Clone, Debug)]
+pub struct Dielectric {
+    /// Refractive index (η)
+    refraction_index: f64,
+}
+
+impl Dielectric {
+    #[inline]
+    pub fn new(eta: f64) -> Self {
+        Self { refraction_index: eta }
+    }
+
+    /// Schlick's approximation for reflectance.
+    #[inline]
+    fn reflectance(cosine: f64, refraction_index: f64) -> f64 {
+        // r0 = ((1 - n) / (1 + n))^2
+        let mut r0 = (1.0 - refraction_index) / (1.0 + refraction_index);
+        r0 *= r0;
+        // R(θ) ≈ r0 + (1 - r0)(1 - cosθ)^5
+        r0 + (1.0 - r0) * (1.0 - cosine).powi(5)
+    }
+}
+
+impl Material for Dielectric {
+    fn scatter(
+        &self,
+        r_in: &Ray,
+        rec: &HitRecord,
+        attenuation: &mut Color,
+        scattered: &mut Ray,
+    ) -> bool {
+        *attenuation = Color::new(1.0, 1.0, 1.0); // no absorption in this simple model
+
+        // Relative IOR (air→material or material→air)
+        let ri = if rec.front_face { 1.0 / self.refraction_index } else { self.refraction_index };
+
+        let unit_direction = unit_vector(r_in.direction());
+        let cos_theta = f64::min(dot(-unit_direction, rec.normal), 1.0);
+        let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
+
+        // Total internal reflection?
+        let cannot_refract = ri * sin_theta > 1.0;
+
+        // Schlick: probabilistic reflect vs refract
+        let direction = if cannot_refract || Self::reflectance(cos_theta, ri) > random_double() {
+            reflect(unit_direction, rec.normal)
+        } else {
+            refract(unit_direction, rec.normal, ri)
+        };
+
+        *scattered = Ray::new(rec.p, direction);
+        true
     }
 }

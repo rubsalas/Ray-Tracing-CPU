@@ -70,6 +70,8 @@ pub fn random_double_range(min: f64, max: f64) -> f64 {
 pub use crate::vec3::{cross, dot, unit_vector, Point3, Vec3};
 // vec3 colors
 pub use crate::vec3::Color;
+// Reflect y refract
+pub use crate::vec3::{reflect, refract};
 
 // rays
 pub use crate::ray::Ray;
@@ -90,4 +92,4 @@ pub use crate::hittable_list::{HittableList, HittablePtr};
 pub use crate::interval::Interval;
 
 // material
-pub use crate::material::{Material, MaterialPtr, Lambertian, Metal};
+pub use crate::material::{Material, MaterialPtr, Lambertian, Metal, Dielectric};
