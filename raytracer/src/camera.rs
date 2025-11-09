@@ -1,4 +1,4 @@
-//! `camera` module
+//! Camera module
 //!
 //! Minimal pinhole camera that renders a scene by emitting one primary ray
 //! per pixel
@@ -11,8 +11,7 @@
 
 use std::io::{Result as IoResult, Write};
 
-use crate::prelude::*; // brings: Vec3, Point3, Color, Ray, write_color_to, unit_vector, infinity, etc.
-// use crate::interval::Interval;
+use crate::prelude::*;
 
 /// Simple pinhole camera that renders a gradient sky and surface normals.
 pub struct Camera {
@@ -32,7 +31,13 @@ pub struct Camera {
     pub lookat:   Point3,   // what the camera looks at
     pub vup:      Vec3,     // “up” direction
 
-    // --- Derived / private state (filled by initialize) ---
+    // Depth of field
+    /// Variation angle of rays through each pixel (degrees). 0 disables DoF.
+    pub defocus_angle: f64,
+    /// Distance from lookfrom to plane of perfect focus.
+    pub focus_dist: f64,
+
+    // Derived / private state (filled by initialize)
     image_height: i32,
     pixel_samples_scale: f64,
     center: Point3,
@@ -44,6 +49,10 @@ pub struct Camera {
     u: Vec3,
     v: Vec3,
     w: Vec3,
+
+    // Defocus disk radii (world-space)
+    defocus_disk_u: Vec3,
+    defocus_disk_v: Vec3,
 }
 
 impl Default for Camera {
@@ -60,6 +69,9 @@ impl Default for Camera {
             lookat:   Point3::new(0.0, 0.0, -1.0),
             vup:      Vec3::new(0.0, 1.0, 0.0),
 
+            defocus_angle: 0.0,
+            focus_dist: 10.0,
+
             image_height: 0,
             pixel_samples_scale: 0.0,
             center: Point3::new(0.0, 0.0, 0.0),
@@ -70,6 +82,9 @@ impl Default for Camera {
             u: Vec3::new(0.0, 0.0, 0.0),
             v: Vec3::new(0.0, 0.0, 0.0),
             w: Vec3::new(0.0, 0.0, 0.0),
+
+            defocus_disk_u: Vec3::new(0.0, 0.0, 0.0),
+            defocus_disk_v: Vec3::new(0.0, 0.0, 0.0),
         }
     }
 }
@@ -86,41 +101,71 @@ impl Camera {
 
     /// Computes derived camera parameters (viewport and pixel geometry).
     fn initialize(&mut self) {
-        // Image height (≥ 1)
+        // Image geometry
         self.image_height = (self.image_width as f64 / self.aspect_ratio) as i32;
         if self.image_height < 1 { self.image_height = 1; }
 
         self.pixel_samples_scale = 1.0 / (self.samples_per_pixel as f64);
-
-        // Camera center
         self.center = self.lookfrom;
 
-        // Viewport dimensions from vfov and focus distance
-        let focal_length = (self.lookfrom - self.lookat).length();
+        // Viewport size from vfov and focus distance
         let theta = degrees_to_radians(self.vfov);
         let h = (theta * 0.5).tan();
-        let viewport_height = 2.0 * h * focal_length;
-        let viewport_width  =
-            viewport_height * (self.image_width as f64 / self.image_height as f64);
+        let viewport_height = 2.0 * h * self.focus_dist;
+        let viewport_width  = viewport_height * (self.image_width as f64 / self.image_height as f64);
 
-        // Orthonormal basis (u, v, w)
+        // Camera basis
         self.w = unit_vector(self.lookfrom - self.lookat);
         self.u = unit_vector(cross(self.vup, self.w));
         self.v = cross(self.w, self.u);
 
-        // Edges of the viewport in world space
-        let viewport_u = viewport_width * self.u;     // across (right)
-        let viewport_v = viewport_height * -self.v;   // down
+        // Viewport edges
+        let viewport_u = viewport_width * self.u;      // across
+        let viewport_v = viewport_height * -self.v;    // down
 
         // Pixel deltas
         self.pixel_delta_u = viewport_u / self.image_width as f64;
         self.pixel_delta_v = viewport_v / self.image_height as f64;
 
         // Upper-left pixel center
-        let viewport_upper_left = self.center - (focal_length * self.w)
-                                               - viewport_u * 0.5
-                                               - viewport_v * 0.5;
+        let viewport_upper_left = self.center
+                                 - self.focus_dist * self.w
+                                 - 0.5 * viewport_u
+                                 - 0.5 * viewport_v;
         self.pixel00_loc = viewport_upper_left + 0.5 * (self.pixel_delta_u + self.pixel_delta_v);
+
+        // Defocus disk radii (world space); zero if defocus_angle == 0
+        let defocus_radius = self.focus_dist * (degrees_to_radians(self.defocus_angle * 0.5)).tan();
+        self.defocus_disk_u = self.u * defocus_radius;
+        self.defocus_disk_v = self.v * defocus_radius;
+    }
+
+    /// Returns a random offset inside the pixel: [-0.5, +0.5]^2 (z = 0).
+    #[inline]
+    fn sample_square(&self) -> Vec3 {
+        Vec3::new(random_double() - 0.5, random_double() - 0.5, 0.0)
+    }
+
+    /// Sample a random point on the defocus disk (world space).
+    #[inline]
+    fn defocus_disk_sample(&self) -> Point3 {
+        let p = random_in_unit_disk(); // XY unit disk
+        self.center + p.x * self.defocus_disk_u + p.y * self.defocus_disk_v
+    }
+
+    /// Ray through a jittered sample in pixel (i, j), originating at center or defocus disk.
+    #[inline]
+    fn get_ray(&self, i: i32, j: i32) -> Ray {
+        let offset = self.sample_square();
+        let pixel_sample = self.pixel00_loc
+            + (i as f64 + offset.x) * self.pixel_delta_u
+            + (j as f64 + offset.y) * self.pixel_delta_v;
+
+        let ray_origin =
+            if self.defocus_angle <= 0.0 { self.center } else { self.defocus_disk_sample() };
+        let ray_direction = pixel_sample - ray_origin;
+
+        Ray::new(ray_origin, ray_direction)
     }
 
     /// Renders `world` to a PPM stream (`P3`) with multi-sampling.
@@ -152,31 +197,9 @@ impl Camera {
         Ok(())
     }
 
-    /// Returns a random offset inside the unit square centered at the pixel: [-0.5, +0.5]^2 (z=0).
-    #[inline]
-    fn sample_square(&self) -> Vec3 {
-        Vec3::new(random_double() - 0.5, random_double() - 0.5, 0.0)
-    }
-
-    /// Constructs a ray through a randomly jittered point around pixel `(i, j)`.
-    ///
-    /// Matches the intent of `get_ray` in Listing 45: sample inside the unit
-    /// square around the pixel center via [`sample_square`], convert that to
-    /// world-space using `pixel_delta_u/v`, and shoot from `center`.
-    fn get_ray(&self, i: i32, j: i32) -> Ray {
-        let offset = self.sample_square(); // in [-0.5, +0.5]²
-        let pixel_sample = self.pixel00_loc
-            + (i as f64 + offset.x) * self.pixel_delta_u
-            + (j as f64 + offset.y) * self.pixel_delta_v;
-
-        let ray_origin = self.center;
-        let ray_direction = pixel_sample - ray_origin;
-        Ray::new(ray_origin, ray_direction)
-    }
-
     /// Ray color
     fn ray_color(&self, r: &Ray, depth: i32, world: &impl Hittable) -> Color {
-        // If we've exceeded the ray bounce limit, no more light is gathered.
+        // If the ray bounce limit is exceeded, no more light is gathered.
         if depth <= 0 {
             return Color::new(0.0, 0.0, 0.0);
         }

@@ -7,6 +7,8 @@
 // - Utilidades: length, length_squared, dot, cross, unit_vector
 // - Alias: Point3 (= Vec3), Color (= Vec3)
 
+use crate::prelude::random_double_range;
+
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
@@ -260,6 +262,22 @@ pub fn refract(uv: Vec3, n: Vec3, etai_over_etat: f64) -> Vec3 {
     r_out_perp + r_out_parallel
 }
 
-// -------- Alias semánticos --------
+/// Returns a random point uniformly distributed inside the unit disk on the XY plane.
+/// Uses rejection sampling in the square [-1, +1]² until `|p|² < 1`.
+#[inline]
+pub fn random_in_unit_disk() -> Vec3 {
+    loop {
+        let p = Vec3::new(
+            random_double_range(-1.0, 1.0),
+            random_double_range(-1.0, 1.0),
+            0.0,
+        );
+        if p.length_squared() < 1.0 {
+            return p;
+        }
+    }
+}
+
+// -------- Alias semanticos --------
 pub type Point3 = Vec3; // puntos 3D
 pub type Color  = Vec3; // colores RGB

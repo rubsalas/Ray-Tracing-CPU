@@ -72,6 +72,8 @@ pub use crate::vec3::{cross, dot, unit_vector, Point3, Vec3};
 pub use crate::vec3::Color;
 // Reflect y refract
 pub use crate::vec3::{reflect, refract};
+// Random in unit disk
+pub use crate::vec3::{random_in_unit_disk};
 
 // rays
 pub use crate::ray::Ray;
