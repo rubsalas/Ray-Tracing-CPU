@@ -5,6 +5,12 @@ CE1114 – Proyecto de Aplicación de la Ingeniería en Computadores
 
 * Rust y Cargo
 
+Instalar rustup
+```bash
+sudo apt install rustup
+```
+
+Verificar instalación
 ```bash
 rustup default stable
 rustc --version

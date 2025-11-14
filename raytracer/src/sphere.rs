@@ -8,14 +8,14 @@
 //! reduces precision issues and avoids carrying a factor 2.
 //!
 //! # Notes
-//! - The constructor clamps negative radii to zero (matching the C++ `fmax(0, r)`).
+//! - The constructor clamps negative radii to zero.
 //! - Normal is computed as `(p - center) / radius`, which is unit length for
 //!   `radius > 0`. For `radius == 0` the sphere degenerates and will not report hits.
 
 use crate::ray::Ray;
 use crate::interval::Interval;
 use crate::material::MaterialPtr;
-use crate::vec3::{dot, Point3, Vec3};
+use crate::vec3::{dot, Point3};
 use crate::hittable::{HitRecord, Hittable};
 
 /// Solid sphere defined by a `center` and a non-negative `radius`.
@@ -23,7 +23,7 @@ use crate::hittable::{HitRecord, Hittable};
 pub struct Sphere {
     center: Point3,
     radius: f64,
-    mat: MaterialPtr,            // NEW: shared pointer to material
+    mat: MaterialPtr,
 }
 
 
@@ -54,7 +54,7 @@ impl Hittable for Sphere {
     fn hit(&self, r: &Ray, ray_t: &Interval, rec: &mut HitRecord) -> bool {
         if self.radius <= 0.0 { return false; }
 
-        // Ray-sphere (with "h" trick) as before
+        // Ray-sphere (with "h" trick)
         let oc = self.center - r.origin();
         let a = r.direction().length_squared();
         let h = dot(r.direction(), oc);
@@ -79,7 +79,7 @@ impl Hittable for Sphere {
         let outward_normal = (rec.p - self.center) / self.radius;
         rec.set_face_normal(r, outward_normal);
 
-        // NEW: attach material to the hit record
+        // Attach material to the hit record
         rec.mat = Some(self.mat.clone());
 
         true
