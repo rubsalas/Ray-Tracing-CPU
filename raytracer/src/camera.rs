@@ -100,7 +100,7 @@ impl Camera {
     }
 
     /// Computes derived camera parameters (viewport and pixel geometry).
-    fn initialize(&mut self) {
+    pub fn initialize(&mut self) {
         // Image geometry
         self.image_height = (self.image_width as f64 / self.aspect_ratio) as i32;
         if self.image_height < 1 { self.image_height = 1; }
@@ -155,7 +155,7 @@ impl Camera {
 
     /// Ray through a jittered sample in pixel (i, j), originating at center or defocus disk.
     #[inline]
-    fn get_ray(&self, i: i32, j: i32) -> Ray {
+    pub fn get_ray(&self, i: i32, j: i32) -> Ray {
         let offset = self.sample_square();
         let pixel_sample = self.pixel00_loc
             + (i as f64 + offset.x) * self.pixel_delta_u
@@ -169,6 +169,7 @@ impl Camera {
     }
 
     /// Renders `world` to a PPM stream (`P3`) with multi-sampling.
+    #[allow(dead_code)]
     pub fn render<W: Write>(&mut self, world: &impl Hittable, out: &mut W) -> IoResult<()> {
         self.initialize();
 
@@ -198,7 +199,7 @@ impl Camera {
     }
 
     /// Ray color
-    fn ray_color(&self, r: &Ray, depth: i32, world: &impl Hittable) -> Color {
+    pub fn ray_color(&self, r: &Ray, depth: i32, world: &dyn Hittable) -> Color {
         // If the ray bounce limit is exceeded, no more light is gathered.
         if depth <= 0 {
             return Color::new(0.0, 0.0, 0.0);
@@ -224,4 +225,14 @@ impl Camera {
         let a = 0.5 * (unit_direction.y + 1.0);
         (1.0 - a) * Color::new(1.0, 1.0, 1.0) + a * Color::new(0.5, 0.7, 1.0)
     }
+
+    /// Con esto el backend puede preguntar “cuál fue la altura final”
+    /// y “en cuánto escalo el color por 1/spp”.
+    pub fn image_height(&self) -> i32 {
+        self.image_height
+    }
+
+    pub fn pixel_samples_scale(&self) -> f64 {
+        self.pixel_samples_scale
+    }   
 }

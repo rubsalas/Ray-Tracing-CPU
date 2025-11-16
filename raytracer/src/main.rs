@@ -8,13 +8,17 @@ mod material;
 mod sphere;
 mod prelude;
 mod camera;
+mod render;
+mod output;
 
 use crate::prelude::*;
 use crate::camera::Camera;
+use crate::render::{RenderParams, BackendKind, make_renderer};
+use crate::output::write_ppm;
 
 use std::rc::Rc;
-use std::fs::File;
-use std::io::{BufWriter, Result as IoResult};
+use std::path::Path;
+use std::io::{Result as IoResult};
 
 fn main() -> IoResult<()> {
     // ---------- World ----------
@@ -82,8 +86,8 @@ fn main() -> IoResult<()> {
     world.add(Rc::new(Sphere::new(Point3::new( 4.0, 1.0, 0.0), 1.0, material3)) as HittablePtr);
 
     // ---------- Camera ----------
-    let mut cam = Camera::new(1200 /*400*/, 16.0 / 9.0);
-    cam.samples_per_pixel = 500; /*100*/
+    let mut cam = Camera::new(/*1200*/ 400, 16.0 / 9.0);
+    cam.samples_per_pixel = 100; /*500*/
     cam.max_depth = 50;
 
     cam.vfov = 20.0;
@@ -94,9 +98,34 @@ fn main() -> IoResult<()> {
     cam.defocus_angle = 0.6;
     cam.focus_dist    = 10.0;
 
-    // ---------- Output ----------
-    let file = File::create("image23.ppm")?;
-    let mut out = BufWriter::new(file);
+    // ---------- Render Params ----------
+    let params = RenderParams {
+        image_width: cam.image_width,
+        aspect_ratio: cam.aspect_ratio,
+        samples_per_pixel: cam.samples_per_pixel,
+        max_depth: cam.max_depth,
+    };
 
-    cam.render(&world, &mut out)
+    // Altura deducida igual que en camera.initialize
+    let mut image_height = (params.image_width as f64 / params.aspect_ratio) as i32;
+    if image_height < 1 { image_height = 1; }
+
+    // Framebuffer en memoria: un Color por píxel
+    let mut framebuffer = vec![
+        Color::new(0.0, 0.0, 0.0);
+        (params.image_width * image_height) as usize
+    ];
+
+    // ---------- Render backend ----------
+    let backend_kind = BackendKind::Scalar; // luego se podrá cambiar a Neon
+    let mut renderer = make_renderer(backend_kind);
+
+    renderer.render(&world, &mut cam, &params, &mut framebuffer);
+
+    // ---------- Output ----------
+    // Nombre de archivo según backend o config
+    let output_path = Path::new("output/image_scalar.ppm");
+    write_ppm(output_path, params.image_width, image_height, &framebuffer)?;
+
+    Ok(())
 }
