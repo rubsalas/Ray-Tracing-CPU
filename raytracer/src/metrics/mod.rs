@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::vec3::Color;
 use crate::camera::Camera;
-use crate::hittable::Hittable;
+use crate::world::hittable::Hittable;
 use crate::render::{RenderParams, BackendKind, Renderer};
 
 pub mod runlog; // submódulo para escritura a archivo

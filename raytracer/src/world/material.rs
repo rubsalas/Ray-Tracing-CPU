@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use crate::ray::Ray;
 use crate::prelude::*;
-use crate::hittable::HitRecord;
+use crate::world::hittable::HitRecord;
 
 /// Trait for shading and scattering behavior at surface hits.
 pub trait Material {

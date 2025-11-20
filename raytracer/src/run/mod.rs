@@ -8,7 +8,7 @@ use chrono::Local;
 use crate::prelude::*; // Color, Point3, Vec3
 use crate::camera::Camera;
 use crate::render::{RenderParams, BackendKind, make_renderer};
-use crate::output::write_ppm;
+use crate::image::output::write_ppm;
 use crate::metrics::{RunMetrics, MetricsCollector};
 use crate::metrics::runlog::write_metrics_to_file;
 use crate::scene::{SceneKind, build_world};

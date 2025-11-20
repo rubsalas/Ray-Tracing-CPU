@@ -25,7 +25,7 @@ use std::rc::Rc;
 
 use crate::ray::Ray;
 use crate::interval::Interval;
-use crate::hittable::{HitRecord, Hittable};
+use crate::world::hittable::{HitRecord, Hittable};
 
 /// Shared reference type for hittables
 pub type HittablePtr = Rc<dyn Hittable>;

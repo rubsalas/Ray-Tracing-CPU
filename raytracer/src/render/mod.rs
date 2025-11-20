@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::camera::Camera;
-use crate::hittable::Hittable;
+use crate::world::hittable::Hittable;
 
 /// Parámetros lógicos del render
 pub struct RenderParams {

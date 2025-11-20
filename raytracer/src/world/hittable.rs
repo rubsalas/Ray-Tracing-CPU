@@ -7,7 +7,7 @@
 
 use crate::ray::Ray;
 use crate::interval::Interval;
-use crate::material::MaterialPtr;
+use crate::world::material::MaterialPtr;
 use crate::vec3::{dot, Point3, Vec3};
 
 /// Intersection data produced by a successful `hit`.
