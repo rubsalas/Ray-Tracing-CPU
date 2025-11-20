@@ -16,3 +16,7 @@ target
 # Ray Tracer
 # image generated
 *.ppm
+
+# No incluir el folder de los outputs
+output
+runs
