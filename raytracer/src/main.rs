@@ -28,7 +28,7 @@ fn main() -> IoResult<()> {
         RunConfig {
             backend: BackendKind::Neon,
             scene: SceneKind::Initial,
-            image_width: 400,       // 1200
+            image_width: 403,       // 1200
             aspect_ratio: 16.0 / 9.0,
             samples_per_pixel: 100, // 500
             max_depth: 50,
@@ -37,8 +37,8 @@ fn main() -> IoResult<()> {
         // Esto es otra corrida
         RunConfig {
             backend: BackendKind::Scalar,
-            scene: SceneKind::ManySpheres,
-            image_width: 400,       // 1200
+            scene: SceneKind::Initial, //ManySpheres,
+            image_width: 403,       // 1200
             aspect_ratio: 16.0 / 9.0,
             samples_per_pixel: 100, // 500
             max_depth: 50,

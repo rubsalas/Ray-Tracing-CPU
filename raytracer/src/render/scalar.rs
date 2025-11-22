@@ -22,7 +22,7 @@ impl Renderer for ScalarRenderer {
         params: &RenderParams,
         framebuffer: &mut [Color],
     ) {
-        // Prepara la cámara (igual que antes en Camera::render)
+        // Prepara la cámara
         camera.initialize();
 
         let image_width = params.image_width;
