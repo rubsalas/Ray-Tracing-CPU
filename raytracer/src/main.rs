@@ -12,6 +12,8 @@ mod metrics;
 mod scene;
 mod run;
 
+mod simd;
+
 
 use std::io::Result as IoResult;
 
