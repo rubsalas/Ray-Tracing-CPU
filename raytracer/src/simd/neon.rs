@@ -122,6 +122,27 @@ impl F32x4 {
     pub fn sqrt(self) -> Self {
         unsafe { F32x4(vsqrtq_f32(self.0)) }
     }
+
+    /// Lane-wise minimum: for each lane `i`, result[i] = min(self[i], other[i]).
+    ///
+    /// This is used as a building block for SIMD clamp operations, where the
+    /// scalar version uses `value.clamp(min, max)` and we want the same effect
+    /// on four lanes at once.
+    #[inline]
+    pub fn min(self, other: Self) -> Self {
+        unsafe { F32x4(vminq_f32(self.0, other.0)) }
+    }
+
+    /// Lane-wise maximum: for each lane `i`, result[i] = max(self[i], other[i]).
+    ///
+    /// Together with [`F32x4::min`], this allows us to implement:
+    ///   clamp(x, min, max) = x.max(min).min(max)
+    /// in a SIMD-friendly way.
+    #[inline]
+    pub fn max(self, other: Self) -> Self {
+        unsafe { F32x4(vmaxq_f32(self.0, other.0)) }
+    }
+
 }
 
 // -----------------------------------------------------------------------------

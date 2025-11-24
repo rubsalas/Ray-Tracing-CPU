@@ -7,11 +7,13 @@ use chrono::Local;
 
 use crate::prelude::*; // Color, Point3, Vec3
 use crate::camera::Camera;
-use crate::render::{RenderParams, BackendKind, make_renderer};
 use crate::image::output::write_ppm;
-use crate::metrics::{RunMetrics, MetricsCollector};
-use crate::metrics::runlog::write_metrics_to_file;
+#[cfg(target_arch = "aarch64")]
+use crate::image::output::write_ppm_neon;
 use crate::scene::{SceneKind, build_world};
+use crate::metrics::runlog::write_metrics_to_file;
+use crate::metrics::{RunMetrics, MetricsCollector};
+use crate::render::{RenderParams, BackendKind, make_renderer};
 
 /// Configuración de una corrida de render.
 /// Más adelante aquí se puede agregar scene_seed.
@@ -89,7 +91,9 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
 
     // Altura de imagen estimada (igual que en Camera::initialize).
     let mut image_height = (params.image_width as f64 / params.aspect_ratio) as i32;
-    if image_height < 1 { image_height = 1; }
+    if image_height < 1 {
+        image_height = 1;
+    }
 
     // Framebuffer en memoria: un Color por píxel.
     let mut framebuffer = vec![
@@ -101,7 +105,7 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
     let backend_kind = config.backend;
     let mut renderer = make_renderer(backend_kind);
 
-    // Se contruye el run_id usando la resolución planeada y spp.
+    // Se construye el run_id usando la resolución planeada y spp.
     let run_id = build_run_id(
         backend_kind,
         params.image_width,
@@ -126,7 +130,43 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
     // ---------- Output de imagen ----------
     let image_filename = format!("output/{}.ppm", metrics.run_id);
     let image_path = Path::new(&image_filename);
-    write_ppm(image_path, params.image_width, final_image_height, &framebuffer)?;
+
+    match backend_kind {
+        BackendKind::Scalar => {
+            // Camino 100% escalar: renderer escalar + postprocesado escalar.
+            write_ppm(
+                image_path,
+                params.image_width,
+                final_image_height,
+                &framebuffer,
+            )?;
+        }
+
+        BackendKind::Neon => {
+            // Si esta en aarch64, se usa el writer NEON (postprocesado SIMD).
+            // En otras arquitecturas, se hace el fallback al writer escalar.
+            #[cfg(target_arch = "aarch64")]
+            {
+                write_ppm_neon(
+                    image_path,
+                    params.image_width,
+                    final_image_height,
+                    &framebuffer,
+                )?;
+            }
+
+            #[cfg(not(target_arch = "aarch64"))]
+            {
+                // Fallback seguro: mismo comportamiento que el camino escalar.
+                write_ppm(
+                    image_path,
+                    params.image_width,
+                    final_image_height,
+                    &framebuffer,
+                )?;
+            }
+        }
+    }
 
     // ---------- Output de métricas ----------
     let metrics_filename = format!("runs/{}.txt", metrics.run_id);
@@ -135,7 +175,12 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
 
     // ---------- Log en consola ----------
     eprintln!(
-        "\nRun {} completed: \nbackend={:?}, \nresolution={}x{}, \nspp={}, \nmax_depth={}, \nrender_time_ms={}",
+        "\nRun {} completed: \
+         \nbackend={:?}, \
+         \nresolution={}x{}, \
+         \nspp={}, \
+         \nmax_depth={}, \
+         \nrender_time_ms={}",
         metrics.run_id,
         metrics.backend,
         metrics.image_width,
