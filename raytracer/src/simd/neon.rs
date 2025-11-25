@@ -22,6 +22,10 @@
 
 use core::arch::aarch64::*;
 
+use crate::ray::Ray;
+use crate::vec3::{Vec3, Point3};
+
+
 /// A wrapper around a NEON vector of four `f32` values (`float32x4_t`).
 ///
 /// This type represents four single-precision floating-point numbers packed
@@ -364,6 +368,102 @@ impl Vec3x4 {
     }
 }
 
+/// A bundle of 4 rays stored in SIMD-friendly form.
+///
+/// Each field is a Vec3x4, which internally holds three F32x4 vectors:
+/// - `orig`: 4 origins (one per lane),
+/// - `dir`:  4 directions (one per lane).
+///
+/// In this first phase (4.1), Ray4 is mainly used as a container:
+/// we still build rays using the scalar Camera::get_ray, then pack them
+/// into Ray4 and later unpack them back to 4 scalar `Ray` values.
+#[derive(Clone, Copy)]
+pub struct Ray4 {
+    pub orig: Vec3x4,
+    pub dir:  Vec3x4,
+}
+
+impl Ray4 {
+    /// Packs four scalar rays into a Ray4 by converting the f64 components
+    /// to f32 and storing them into Vec3x4 / F32x4 lanes.
+    ///
+    /// This is a transitional helper: the goal in later stages is to
+    /// build Ray4 directly from SIMD math in the camera, but for now we
+    /// reuse the existing scalar `Ray` construction.
+    pub fn from_rays(rays: [Ray; 4]) -> Self {
+        // Arrays of 4 lanes for origin and direction, in f32.
+        let mut ox = [0.0f32; 4];
+        let mut oy = [0.0f32; 4];
+        let mut oz = [0.0f32; 4];
+
+        let mut dx = [0.0f32; 4];
+        let mut dy = [0.0f32; 4];
+        let mut dz = [0.0f32; 4];
+
+        for lane in 0..4 {
+            let r = &rays[lane];
+
+            // We rely on the Ray API (origin() and direction()).
+            let o = r.origin();
+            let d = r.direction();
+
+            ox[lane] = o.x as f32;
+            oy[lane] = o.y as f32;
+            oz[lane] = o.z as f32;
+
+            dx[lane] = d.x as f32;
+            dy[lane] = d.y as f32;
+            dz[lane] = d.z as f32;
+        }
+
+        Ray4 {
+            orig: Vec3x4 {
+                x: F32x4::from_array(ox),
+                y: F32x4::from_array(oy),
+                z: F32x4::from_array(oz),
+            },
+            dir: Vec3x4 {
+                x: F32x4::from_array(dx),
+                y: F32x4::from_array(dy),
+                z: F32x4::from_array(dz),
+            },
+        }
+    }
+
+    /// Extracts a single scalar `Ray` from lane `lane` (0..3).
+    ///
+    /// This converts the internal f32 lane values back to f64 and
+    /// rebuilds a standard `Ray` using `Ray::new`.
+    pub fn lane(&self, lane: usize) -> Ray {
+        debug_assert!(lane < 4, "Ray4::lane index out of bounds");
+
+        // Convert SIMD vectors back to arrays so we can pick a single lane.
+        let ox = self.orig.x.to_array();
+        let oy = self.orig.y.to_array();
+        let oz = self.orig.z.to_array();
+
+        let dx = self.dir.x.to_array();
+        let dy = self.dir.y.to_array();
+        let dz = self.dir.z.to_array();
+
+        let origin = Point3::new(
+            ox[lane] as f64,
+            oy[lane] as f64,
+            oz[lane] as f64,
+        );
+        let direction = Vec3::new(
+            dx[lane] as f64,
+            dy[lane] as f64,
+            dz[lane] as f64,
+        );
+
+        Ray::new(origin, direction)
+    }
+}
+
+
+
+
 // -----------------------------------------------------------------------------
 // Unit tests: SIMD vs scalar reference implementations
 // -----------------------------------------------------------------------------
@@ -375,12 +475,18 @@ impl Vec3x4 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ray::Ray;
+    use crate::vec3::{Point3, Vec3};
 
     /// Simple helper for approximate floating-point comparisons.
     ///
     /// Returns `true` if the absolute difference between `a` and `b`
     /// is less than or equal to `eps`.
     fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
+        (a - b).abs() <= eps
+    }
+
+    fn approx_eq_f64(a: f64, b: f64, eps: f64) -> bool {
         (a - b).abs() <= eps
     }
 
@@ -535,4 +641,124 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn ray4_from_rays_and_lane_roundtrip() {
+        // Four simple, distinct rays so that we can verify each lane.
+        let r0 = Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        let r1 = Ray::new(Point3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
+        let r2 = Ray::new(Point3::new(-1.0, -2.0, -3.0), Vec3::new(0.0, 0.0, 1.0));
+        let r3 = Ray::new(Point3::new(10.0, 20.0, 30.0), Vec3::new(1.0, 1.0, 1.0));
+
+        let rays = [r0, r1, r2, r3];
+
+        // Pack the four rays into Ray4.
+        let ray4 = Ray4::from_rays(rays);
+
+        // Unpack each lane and compare back to the original rays.
+        for lane in 0..4 {
+            let original = &rays[lane];
+            let unpacked = ray4.lane(lane);
+
+            let o_orig = original.origin();
+            let d_orig = original.direction();
+
+            let o_unpack = unpacked.origin();
+            let d_unpack = unpacked.direction();
+
+            // Allow a small epsilon due to f64 -> f32 -> f64 conversion.
+            let eps = 1e-5;
+
+            assert!(
+                approx_eq_f64(o_orig.x, o_unpack.x, eps)
+                    && approx_eq_f64(o_orig.y, o_unpack.y, eps)
+                    && approx_eq_f64(o_orig.z, o_unpack.z, eps),
+                "Origin mismatch at lane {}: orig={:?}, unpack={:?}",
+                lane,
+                o_orig,
+                o_unpack
+            );
+
+            assert!(
+                approx_eq_f64(d_orig.x, d_unpack.x, eps)
+                    && approx_eq_f64(d_orig.y, d_unpack.y, eps)
+                    && approx_eq_f64(d_orig.z, d_unpack.z, eps),
+                "Direction mismatch at lane {}: orig={:?}, unpack={:?}",
+                lane,
+                d_orig,
+                d_unpack
+            );
+        }
+    }
+
+    /// Verifies that the SIMD computation
+    ///   sample = p00 + u * du + v * dv
+    /// matches the scalar computation lane by lane
+    /// for a simple synthetic case, using pure f32 math.
+    #[test]
+    fn camera_geometry_block_matches_scalar() {
+        // Synthetic camera geometry in f32:
+        // p00 = (1, 2, 3)
+        // du  = (0.5, 0.0, -0.5)
+        // dv  = (0.0, 1.0,  0.25)
+        let p00 = [1.0_f32, 2.0_f32, 3.0_f32];
+        let du  = [0.5_f32, 0.0_f32, -0.5_f32];
+        let dv  = [0.0_f32, 1.0_f32, 0.25_f32];
+
+        // Four lanes of u/v (simulating four different pixels).
+        let u = [0.0_f32, 1.0_f32, 2.0_f32, 3.0_f32];
+        let v = [0.0_f32, 0.5_f32, 1.0_f32, 1.5_f32];
+
+        // Scalar reference: sample_scalar[lane] = p00 + u[lane]*du + v[lane]*dv
+        let mut scalar_samples = [[0.0_f32; 3]; 4];
+        for lane in 0..4 {
+            let ux = u[lane];
+            let vx = v[lane];
+
+            scalar_samples[lane][0] = p00[0] + ux * du[0] + vx * dv[0];
+            scalar_samples[lane][1] = p00[1] + ux * du[1] + vx * dv[1];
+            scalar_samples[lane][2] = p00[2] + ux * du[2] + vx * dv[2];
+        }
+
+        // SIMD path: mimic the math used in Camera::get_ray4_from_indices.
+        let p00x = F32x4::splat(p00[0]);
+        let p00y = F32x4::splat(p00[1]);
+        let p00z = F32x4::splat(p00[2]);
+
+        let dux = F32x4::splat(du[0]);
+        let duy = F32x4::splat(du[1]);
+        let duz = F32x4::splat(du[2]);
+
+        let dvx = F32x4::splat(dv[0]);
+        let dvy = F32x4::splat(dv[1]);
+        let dvz = F32x4::splat(dv[2]);
+
+        let u4 = F32x4::from_array(u);
+        let v4 = F32x4::from_array(v);
+
+        let sample_x = p00x.add(dux.mul(u4)).add(dvx.mul(v4));
+        let sample_y = p00y.add(duy.mul(u4)).add(dvy.mul(v4));
+        let sample_z = p00z.add(duz.mul(u4)).add(dvz.mul(v4));
+
+        let sx = sample_x.to_array();
+        let sy = sample_y.to_array();
+        let sz = sample_z.to_array();
+
+        let eps = 1e-5_f32;
+
+        for lane in 0..4 {
+            let s = scalar_samples[lane];
+
+            assert!(
+                approx_eq(s[0], sx[lane], eps)
+                    && approx_eq(s[1], sy[lane], eps)
+                    && approx_eq(s[2], sz[lane], eps),
+                "Mismatch at lane {}: scalar=({:.6}, {:.6}, {:.6}), simd=({:.6}, {:.6}, {:.6})",
+                lane,
+                s[0], s[1], s[2],
+                sx[lane], sy[lane], sz[lane],
+            );
+        }
+    }
+
 }

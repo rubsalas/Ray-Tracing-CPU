@@ -13,6 +13,9 @@ use std::io::{Result as IoResult, Write};
 
 use crate::prelude::*;
 
+#[cfg(target_arch = "aarch64")]
+use crate::simd::neon::{F32x4, Ray4, Vec3x4};
+
 /// Simple pinhole camera that renders a gradient sky and surface normals.
 pub struct Camera {
     /// Image width in pixels.
@@ -234,5 +237,151 @@ impl Camera {
 
     pub fn pixel_samples_scale(&self) -> f64 {
         self.pixel_samples_scale
-    }   
+    }  
+
+    /// Builds four rays for pixels `(i_base + 0, i_base + 1, i_base + 2, i_base + 3)`
+    /// on the same scanline `j`, using:
+    ///
+    /// - Scalar randomness for per-pixel jitter and (optionally) depth of field.
+    /// - SIMD math (`F32x4` + `Vec3x4`) for camera geometry in world-space.
+    ///
+    /// The Neon backend uses this method to construct 4 rays in parallel,
+    /// and then unpacks each lane back into a scalar `Ray` to feed the existing
+    /// `ray_color` implementation. This keeps shading fully scalar in phase 4,
+    /// while already exercising the SIMD camera path.
+    ///
+    /// High-level steps:
+    /// 1) For each lane 0..3:
+    ///    - Sample a random offset inside the pixel via `sample_square()`.
+    ///    - Build the `(u, v)` coordinates for that sample.
+    /// 2) Pack the four `u` and four `v` into `F32x4` vectors (`u4`, `v4`).
+    /// 3) Compute the four pixel sample positions:
+    ///      `pixel_sample = pixel00_loc + u * pixel_delta_u + v * pixel_delta_v`
+    ///    in parallel for x, y, z.
+    /// 4) Build four ray origins:
+    ///    - If defocus is disabled, all origins are `center`.
+    ///    - If defocus is enabled, each lane gets its own sample in the defocus disk.
+    /// 5) Directions are computed as `pixel_sample - origin` in SIMD.
+    /// 6) The result is returned as `Ray4 { orig: Vec3x4, dir: Vec3x4 }`.
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_ray4_from_indices(&self, i_base: i32, j: i32) -> Ray4 {
+        // ----------------------------
+        // 1) Scalar jitter per lane → u[], v[]
+        // ----------------------------
+
+        // Arrays of 4 lanes for pixel sample coordinates in image space.
+        // We keep them as f32 because the SIMD layer works in f32 (NEON float32x4).
+        let mut u = [0.0f32; 4];
+        let mut v = [0.0f32; 4];
+
+        for lane in 0..4 {
+            // Original scalar path uses `sample_square()` to jitter inside the pixel:
+            // offset.x, offset.y in [-0.5, +0.5].
+            let offset = self.sample_square();
+
+            let i_f = (i_base + lane as i32) as f64 + offset.x;
+            let j_f = j as f64 + offset.y;
+
+            u[lane] = i_f as f32;
+            v[lane] = j_f as f32;
+        }
+
+        // Pack u[] and v[] into NEON vectors (4 lanes each).
+        let u4 = F32x4::from_array(u);
+        let v4 = F32x4::from_array(v);
+
+        // ----------------------------
+        // 2) Camera geometry in SIMD form
+        // ----------------------------
+        //
+        // We reuse the internal camera state computed in `initialize()`:
+        // - pixel00_loc: upper-left pixel center in world-space
+        // - pixel_delta_u: step in world-space when moving +1 in image x
+        // - pixel_delta_v: step in world-space when moving +1 in image y
+
+        let p00 = &self.pixel00_loc;
+        let du = &self.pixel_delta_u;
+        let dv = &self.pixel_delta_v;
+
+        // Broadcast the world-space base point and deltas into SIMD lanes.
+        let p00x = F32x4::splat(p00.x as f32);
+        let p00y = F32x4::splat(p00.y as f32);
+        let p00z = F32x4::splat(p00.z as f32);
+
+        let dux = F32x4::splat(du.x as f32);
+        let duy = F32x4::splat(du.y as f32);
+        let duz = F32x4::splat(du.z as f32);
+
+        let dvx = F32x4::splat(dv.x as f32);
+        let dvy = F32x4::splat(dv.y as f32);
+        let dvz = F32x4::splat(dv.z as f32);
+
+        // pixel_sample = pixel00_loc + u * pixel_delta_u + v * pixel_delta_v
+        //
+        // We do this component-wise using F32x4 arithmetic. The exact
+        // combination uses the helper methods `mul` and `add` we already
+        // defined in F32x4.
+        let sample_x = p00x.add(dux.mul(u4)).add(dvx.mul(v4));
+        let sample_y = p00y.add(duy.mul(u4)).add(dvy.mul(v4));
+        let sample_z = p00z.add(duz.mul(u4)).add(dvz.mul(v4));
+
+        // ----------------------------
+        // 3) Ray origins (with or without defocus)
+        // ----------------------------
+        //
+        // If defocus is disabled, all rays originate at `center`.
+        // If defocus is enabled, we sample one point in the defocus disk per lane.
+
+        let mut ox = [0.0f32; 4];
+        let mut oy = [0.0f32; 4];
+        let mut oz = [0.0f32; 4];
+
+        if self.defocus_angle <= 0.0 {
+            // No depth-of-field: all origins equal to camera center.
+            for lane in 0..4 {
+                ox[lane] = self.center.x as f32;
+                oy[lane] = self.center.y as f32;
+                oz[lane] = self.center.z as f32;
+            }
+        } else {
+            // Depth-of-field enabled: per-lane random point on defocus disk.
+            for lane in 0..4 {
+                let origin = self.defocus_disk_sample();
+                ox[lane] = origin.x as f32;
+                oy[lane] = origin.y as f32;
+                oz[lane] = origin.z as f32;
+            }
+        }
+
+        let origin_x = F32x4::from_array(ox);
+        let origin_y = F32x4::from_array(oy);
+        let origin_z = F32x4::from_array(oz);
+
+        // ----------------------------
+        // 4) Directions = sample - origin
+        // ----------------------------
+
+        let dir_x = sample_x.sub(origin_x);
+        let dir_y = sample_y.sub(origin_y);
+        let dir_z = sample_z.sub(origin_z);
+
+        // ----------------------------
+        // 5) Pack into Vec3x4 and Ray4
+        // ----------------------------
+
+        let orig = Vec3x4 {
+            x: origin_x,
+            y: origin_y,
+            z: origin_z,
+        };
+
+        let dir = Vec3x4 {
+            x: dir_x,
+            y: dir_y,
+            z: dir_z,
+        };
+
+        Ray4 { orig, dir }
+    }
+
 }

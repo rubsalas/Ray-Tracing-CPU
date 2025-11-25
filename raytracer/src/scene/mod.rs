@@ -42,10 +42,10 @@ fn build_initial_scene(world: &mut HittableList) {
     let material_right:  MaterialPtr = Rc::new(Metal::new(Color::new(0.8, 0.6, 0.2), 1.0));
 
     world.add(Rc::new(Sphere::new(Point3::new( 0.0, -100.5, -1.0), 100.0, material_ground.clone())) as HittablePtr);
-    world.add(Rc::new(Sphere::new(Point3::new( 0.0,    0.0, -1.2),   0.5, material_center.clone())) as HittablePtr);
+    world.add(Rc::new(Sphere::new(Point3::new( 0.0,    0.0, -2.0),   0.5, material_center.clone())) as HittablePtr);
     world.add(Rc::new(Sphere::new(Point3::new(-1.0,    0.0, -1.0),   0.5, material_left.clone()))   as HittablePtr);
     world.add(Rc::new(Sphere::new(Point3::new(-1.0,    0.0, -1.0),   0.4, material_bubble.clone())) as HittablePtr); // bubble
-    world.add(Rc::new(Sphere::new(Point3::new( 1.0,    0.0, -1.0),   0.5, material_right.clone()))  as HittablePtr);
+    world.add(Rc::new(Sphere::new(Point3::new( 1.0,    0.0, 1.0),   0.5, material_right.clone()))  as HittablePtr);
 }
 
 /// Escena grande con piso y muchas esferas aleatorias + 3 grandes.
