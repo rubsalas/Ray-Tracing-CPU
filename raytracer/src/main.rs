@@ -28,7 +28,7 @@ fn main() -> IoResult<()> {
 
         // Aquí se define una sola corrida
         RunConfig {
-            backend: BackendKind::Neon,
+            backend: BackendKind::Scalar,
             scene: SceneKind::Initial,  // Initial
             image_width: 403,       // 1200
             aspect_ratio: 16.0 / 9.0,
@@ -38,7 +38,7 @@ fn main() -> IoResult<()> {
         
         // Esto es otra corrida
         RunConfig {
-            backend: BackendKind::Scalar,
+            backend: BackendKind::Neon,
             scene: SceneKind::Initial, //ManySpheres,
             image_width: 403,       // 1200
             aspect_ratio: 16.0 / 9.0,

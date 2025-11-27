@@ -6,6 +6,8 @@ use crate::world::hittable::Hittable;
 
 use super::{RenderParams, Renderer};
 
+use std::any::Any;
+
 pub struct ScalarRenderer;
 
 impl ScalarRenderer {
@@ -52,11 +54,15 @@ impl Renderer for ScalarRenderer {
                 }
 
                 let idx = (j * image_width + i) as usize;
-                // Aquí ya aplicamos el 1/spp
+                // Aquí ya se aplica el 1/spp
                 framebuffer[idx] = pixel_scale * pixel_color;
             }
         }
 
         eprintln!("\rDone.                 ");
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

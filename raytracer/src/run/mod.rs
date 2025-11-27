@@ -5,15 +5,17 @@ use std::io::Result as IoResult;
 
 use chrono::Local;
 
-use crate::prelude::*; // Color, Point3, Vec3
+use crate::prelude::*;
 use crate::camera::Camera;
 use crate::image::output::write_ppm;
 #[cfg(target_arch = "aarch64")]
 use crate::image::output::write_ppm_neon;
-use crate::scene::{SceneKind, build_world};
+
+use crate::scene::{SceneKind, build_scene};
 use crate::metrics::runlog::write_metrics_to_file;
 use crate::metrics::{RunMetrics, MetricsCollector};
-use crate::render::{RenderParams, BackendKind, make_renderer};
+
+use crate::render::{RenderParams, BackendKind, make_renderer_for_scene};
 
 /// Configuración de una corrida de render.
 /// Más adelante aquí se puede agregar scene_seed.
@@ -56,16 +58,22 @@ fn build_run_id(
 }
 
 /// Ejecuta una corrida completa:
-/// - Construye el mundo según la escena.
+/// - Construye la escena según el tipo (World + Vec<Sphere>).
 /// - Configura la cámara.
 /// - Prepara RenderParams y framebuffer.
-/// - Elige backend y construye renderer.
+/// - Elige backend y construye renderer (con o sin aceleración de esferas).
 /// - Mide el render con MetricsCollector.
 /// - Escribe imagen (PPM) y archivo de métricas, ambos con el mismo run_id.
 /// - Retorna las métricas de la corrida.
 pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
-    // ---------- World ----------
-    let world = build_world(config.scene);
+    // ---------- Escena (World + Vec<Sphere>) ----------
+    //
+    // build_scene devuelve:
+    //   - world: HittableList usado por el camino escalar (igual que antes).
+    //   - spheres: Vec<Sphere> plano usado por NEON para world_hit4_spheres.
+    let scene_data = build_scene(config.scene);
+    let world = scene_data.world;
+    let spheres_for_accel = scene_data.spheres;
 
     // ---------- Camera ----------
     let mut cam = Camera::new(config.image_width, config.aspect_ratio);
@@ -103,7 +111,18 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
 
     // ---------- Render backend ----------
     let backend_kind = config.backend;
-    let mut renderer = make_renderer(backend_kind);
+
+    // Para el backend escalar no necesitamos aceleración.
+    // Para el backend NEON, pasamos el Vec<Sphere> que construimos en build_scene.
+    let sphere_accel = match backend_kind {
+        BackendKind::Scalar => None,
+        BackendKind::Neon   => Some(spheres_for_accel),
+    };
+
+    // make_renderer recibe ahora:
+    //   - qué backend usar (Scalar / Neon),
+    //   - y opcionalmente el Vec<Sphere> para aceleración de intersecciones.
+    let mut renderer = make_renderer_for_scene(config.backend, sphere_accel);
 
     // Se construye el run_id usando la resolución planeada y spp.
     let run_id = build_run_id(
@@ -143,7 +162,7 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
         }
 
         BackendKind::Neon => {
-            // Si esta en aarch64, se usa el writer NEON (postprocesado SIMD).
+            // Si está en aarch64, se usa el writer NEON (postprocesado SIMD).
             // En otras arquitecturas, se hace el fallback al writer escalar.
             #[cfg(target_arch = "aarch64")]
             {

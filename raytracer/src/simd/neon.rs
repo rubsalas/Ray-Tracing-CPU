@@ -459,9 +459,21 @@ impl Ray4 {
 
         Ray::new(origin, direction)
     }
+
+    /// Converts this `Ray4` pack into an array of 4 scalar `Ray`s.
+    ///
+    /// This is only used in debug / tests to compare the SIMD path
+    /// against the scalar reference implementation.
+    pub fn to_rays(&self) -> [Ray; 4] {
+        [
+            self.lane(0),
+            self.lane(1),
+            self.lane(2),
+            self.lane(3),
+        ]
+    }
+    
 }
-
-
 
 
 // -----------------------------------------------------------------------------

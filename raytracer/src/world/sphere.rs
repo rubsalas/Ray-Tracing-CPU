@@ -1,7 +1,6 @@
 //! `sphere` module
 //!
 //! Sphere implementation of the [`Hittable`](crate::hittable::Hittable) trait,
-//! using the section 6.2 / 6.3 quadratic simplification from RTIOW.
 //!
 //! The implicit surface equation is ‖P − C‖² = r². Intersecting the ray
 //! `P(t) = O + t·D` yields a quadratic in `t`. Using the *h = D·oc* form
@@ -26,7 +25,6 @@ pub struct Sphere {
     mat: MaterialPtr,
 }
 
-
 impl Sphere {
     /// Creates a sphere with center, non-negative radius, and a material.
     pub fn new(center: Point3, radius: f64, mat: MaterialPtr) -> Self {
@@ -47,6 +45,12 @@ impl Sphere {
     #[inline]
     pub fn radius(&self) -> f64 {
         self.radius
+    }
+
+    /// Returns the radius of the sphere as f32, suitable for SIMD math.
+    #[inline]
+    pub fn radius_f32(&self) -> f32 {
+        self.radius as f32
     }
 }
 
