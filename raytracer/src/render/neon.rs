@@ -19,7 +19,7 @@ use crate::world::hittable::{Hittable, HitRecord};
 use crate::world::sphere::Sphere;
 use crate::interval::Interval;
 
-use crate::simd::neon::Ray4;
+use crate::simd::neon::{Ray4, build_primary_rays_block};
 use crate::simd::hit::{HitInfo4, world_hit4_spheres};
 
 use super::{RenderParams, Renderer};
@@ -165,14 +165,14 @@ impl Renderer for NeonRenderer {
         // Se reinician los contadores para esta corrida.
         self.stats = NeonStats::default();
 
-        // Prepara la cámara igual que en el backend escalar.
+        // Se prepara la cámara igual que en el backend escalar.
         camera.initialize();
 
-        let image_width        = params.image_width;
-        let image_height       = camera.image_height();
-        let samples_per_pixel  = params.samples_per_pixel;
-        let max_depth          = params.max_depth;
-        let pixel_scale        = camera.pixel_samples_scale();
+        let image_width       = params.image_width;
+        let image_height      = camera.image_height();
+        let samples_per_pixel = params.samples_per_pixel;
+        let max_depth         = params.max_depth;
+        let pixel_scale       = camera.pixel_samples_scale();
 
         assert_eq!(
             framebuffer.len(),
@@ -180,8 +180,8 @@ impl Renderer for NeonRenderer {
             "framebuffer size mismatch in NeonRenderer"
         );
 
-        // Si no tenemos aceleración de esferas configurada,
-        // delegamos todo al backend escalar para no romper nada.
+        // Si no se tiene aceleración de esferas configurada,
+        // se delega todo al backend escalar para no alterar el comportamiento.
         let spheres = match &self.sphere_accel {
             Some(v) => v,
             None => {
@@ -198,7 +198,7 @@ impl Renderer for NeonRenderer {
             std::io::stderr().flush().ok();
 
             for i_block in (0..image_width).step_by(4) {
-                // Acumulador de color lineal por lane (para las muestras).
+                // Se inicializa el acumulador de color lineal por lane (para las muestras).
                 let mut lane_accum = [
                     Color::new(0.0, 0.0, 0.0),
                     Color::new(0.0, 0.0, 0.0),
@@ -206,27 +206,13 @@ impl Renderer for NeonRenderer {
                     Color::new(0.0, 0.0, 0.0),
                 ];
 
-                // Multi-sampling por píxel.
+                // Se realiza el multi-sampling por píxel.
                 for _s in 0..samples_per_pixel {
-                    // 1) Construimos 4 rayos primarios escalares (uno por lane).
-                    let mut rays = [
-                        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
-                        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
-                        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
-                        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
-                    ];
-                    let mut lane_valid = [false; 4];
+                    // 1) Se construyen los 4 rayos primarios del bloque mediante el helper.
+                    let (rays, ray4, lane_valid) =
+                        build_primary_rays_block(camera, j, i_block, image_width);
 
-                    for lane in 0..4 {
-                        let ix = i_block + lane as i32;
-                        if ix >= image_width {
-                            continue; // fuera de rango en la última columna
-                        }
-                        lane_valid[lane] = true;
-                        rays[lane] = camera.get_ray(ix, j);
-                    }
-
-                    // Contamos cuántos lanes están activos en esta muestra.
+                    // 2) Se cuenta cuántos lanes están activos en esta muestra.
                     let mut active_lanes = 0_u64;
                     for lane in 0..4 {
                         if lane_valid[lane] {
@@ -236,25 +222,20 @@ impl Renderer for NeonRenderer {
                     // Rayos primarios totales (por muestra).
                     self.stats.primary_rays_total += active_lanes;
 
-                    // 2) Empaquetamos los 4 rayos en un Ray4 SIMD.
-                    let ray4 = Ray4::from_rays(rays);
-
-                    // 3) Calculamos intersecciones primarias vectorizadas
+                    // 3) Se calculan intersecciones primarias vectorizadas
                     //    usando solo esferas (world_hit4_spheres).
                     let t_min = 0.001_f32;
                     let t_max = f32::INFINITY;
                     let info: HitInfo4 = world_hit4_spheres(&ray4, spheres, t_min, t_max);
 
-                    // 4) (Opcional) Chequeo de coherencia en debug:
-                    //    comparamos contra un recorrido escalar equivalente.
+                    // 4) En modo debug, se verifica la coherencia contra un recorrido escalar.
                     #[cfg(debug_assertions)]
                     self.debug_check_world_hit4_vs_scalar(&ray4, spheres, &info);
 
-                    // Contador de lanes que realmente tuvieron hit acelerado.
+                    // 5) Se sombrea escalar por lane, usando el hint SIMD
+                    //    para el primer rebote a través de shade_primary_with_sphere_hint.
                     let mut accelerated_lanes = 0_u64;
 
-                    // 5) Sombreado escalar por lane, usando el hint SIMD
-                    //    para el primer rebote vía shade_primary_with_sphere_hint.
                     for lane in 0..4 {
                         if !lane_valid[lane] {
                             continue;
@@ -265,7 +246,6 @@ impl Renderer for NeonRenderer {
                             accelerated_lanes += 1;
                         }
 
-                        // Color de esta muestra para este píxel/lane.
                         let sample_color = shade_primary_with_sphere_hint(
                             camera,
                             world,
@@ -279,13 +259,13 @@ impl Renderer for NeonRenderer {
                         lane_accum[lane] += sample_color;
                     }
 
-                    // Actualizamos contadores por muestra.
+                    // Se actualizan contadores por muestra.
                     self.stats.primary_rays_accelerated += accelerated_lanes;
                     self.stats.primary_rays_fallback += active_lanes - accelerated_lanes;
                 }
 
-                // 6) Al final del muestreo, escalamos por 1/spp y
-                //    escribimos al framebuffer en forma lineal.
+                // 6) Al final del muestreo, se aplica 1/spp y
+                //    se escribe al framebuffer en forma lineal.
                 for lane in 0..4 {
                     let ix = i_block + lane as i32;
                     if ix >= image_width {
@@ -293,7 +273,7 @@ impl Renderer for NeonRenderer {
                     }
                     let idx = (j * image_width + ix) as usize;
 
-                    // Igual que en ScalarRenderer: dejamos el valor lineal ya
+                    // Igual que en ScalarRenderer: se deja el valor lineal ya
                     // multiplicado por pixel_scale (= 1/samples_per_pixel).
                     framebuffer[idx] = pixel_scale * lane_accum[lane];
                 }

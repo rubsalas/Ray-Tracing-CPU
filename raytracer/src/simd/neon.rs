@@ -23,6 +23,7 @@
 use core::arch::aarch64::*;
 
 use crate::ray::Ray;
+use crate::camera::Camera;
 use crate::vec3::{Vec3, Point3};
 
 
@@ -475,6 +476,61 @@ impl Ray4 {
     
 }
 
+/// Construye un bloque de 4 rayos primarios para una fila `j` y un bloque de columnas
+/// que comienza en `i_block`.
+///
+/// - Se generan hasta 4 rayos con la lógica estándar de la cámara (`get_ray`),
+///   uno por cada píxel `(i_block + lane, j)`.
+/// - Se maneja el caso en que el ancho de la imagen no sea múltiplo de 4 mediante
+///   una máscara de lanes (`lane_valid`), donde:
+///   - `lane_valid[lane] == true` si `i_block + lane < image_width`.
+///   - `lane_valid[lane] == false` en caso contrario, y el rayo correspondiente
+///     se deja en un valor por defecto.
+/// - Se empaquetan los 4 rayos escalares en un `Ray4` para uso SIMD,
+///   mientras que el arreglo `[Ray; 4]` se devuelve para el sombreado escalar.
+pub fn build_primary_rays_block(
+    camera: &Camera,
+    j: i32,
+    i_block: i32,
+    image_width: i32,
+) -> ([Ray; 4], Ray4, [bool; 4]) {
+    // Se inicializa un arreglo de 4 rayos con valores por defecto.
+    // Estos valores se utilizan para los lanes que queden fuera de rango.
+    let mut rays = [
+        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
+        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
+        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
+        Ray::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
+    ];
+
+    // Se marca para cada lane si el píxel correspondiente cae dentro del ancho
+    // real de la imagen. Esto permite manejar la última columna cuando el ancho
+    // no es múltiplo de 4.
+    let mut lane_valid = [false; 4];
+
+    for lane in 0..4 {
+        let ix = i_block + lane as i32;
+
+        // Si la columna se sale del ancho, se deja el rayo por defecto y
+        // se marca el lane como inválido.
+        if ix >= image_width {
+            lane_valid[lane] = false;
+            continue;
+        }
+
+        // Se marca el lane como válido y se genera el rayo escalar estándar
+        // para el píxel (ix, j).
+        lane_valid[lane] = true;
+        rays[lane] = camera.get_ray(ix, j);
+    }
+
+    // Se empaquetan los 4 rayos escalares en un Ray4 para uso SIMD
+    // en la etapa de intersecciones.
+    let ray4 = Ray4::from_rays(rays);
+
+    (rays, ray4, lane_valid)
+}
+
 
 // -----------------------------------------------------------------------------
 // Unit tests: SIMD vs scalar reference implementations
@@ -488,6 +544,7 @@ impl Ray4 {
 mod tests {
     use super::*;
     use crate::ray::Ray;
+    use crate::camera::Camera;
     use crate::vec3::{Point3, Vec3};
 
     /// Simple helper for approximate floating-point comparisons.
@@ -769,6 +826,74 @@ mod tests {
                 lane,
                 s[0], s[1], s[2],
                 sx[lane], sy[lane], sz[lane],
+            );
+        }
+    }
+
+    #[test]
+    fn build_primary_rays_block_marks_valid_lanes_on_edge() {
+        // Se crea una cámara con parámetros sencillos.
+        let cam = Camera::new(8, 16.0 / 9.0);
+        let j = 0;
+        let image_width = 8;
+
+        // Se escoge un bloque que empieza en la columna 6:
+        // lanes:
+        //   lane 0 -> x = 6 (válido)
+        //   lane 1 -> x = 7 (válido)
+        //   lane 2 -> x = 8 (inválido)
+        //   lane 3 -> x = 9 (inválido)
+        let i_block = 6;
+
+        let (rays, _ray4, lane_valid) =
+            build_primary_rays_block(&cam, j, i_block, image_width);
+
+        // Se verifica la máscara de lanes.
+        assert!(lane_valid[0], "lane 0 debe ser válido (x = 6)");
+        assert!(lane_valid[1], "lane 1 debe ser válido (x = 7)");
+        assert!(!lane_valid[2], "lane 2 debe ser inválido (x = 8 >= width)");
+        assert!(!lane_valid[3], "lane 3 debe ser inválido (x = 9 >= width)");
+
+        // Se verifica que para lanes inválidos se mantenga el rayo por defecto.
+        // Como se inicializa con origen y dirección (0,0,0), se utiliza eso
+        // como condición de que no se ha modificado.
+        for lane in 2..4 {
+            let r = &rays[lane];
+            let o = r.origin();
+            let d = r.direction();
+            assert!(
+                o.x == 0.0 && o.y == 0.0 && o.z == 0.0,
+                "lane {} inválido debe conservar origen por defecto", lane
+            );
+            assert!(
+                d.x == 0.0 && d.y == 0.0 && d.z == 0.0,
+                "lane {} inválido debe conservar dirección por defecto", lane
+            );
+        }
+    }
+
+    #[test]
+    fn build_primary_rays_block_marks_all_lanes_valid_when_inside_width() {
+        let cam = Camera::new(8, 16.0 / 9.0);
+        let j = 1;
+        let image_width = 8;
+
+        // Se escoge un bloque que empieza en la columna 2:
+        // lanes:
+        //   lane 0 -> x = 2 (válido)
+        //   lane 1 -> x = 3 (válido)
+        //   lane 2 -> x = 4 (válido)
+        //   lane 3 -> x = 5 (válido)
+        let i_block = 2;
+
+        let (_rays, _ray4, lane_valid) =
+            build_primary_rays_block(&cam, j, i_block, image_width);
+
+        for lane in 0..4 {
+            assert!(
+                lane_valid[lane],
+                "lane {} debe ser válido dentro del ancho de la imagen",
+                lane
             );
         }
     }
