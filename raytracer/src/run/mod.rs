@@ -18,7 +18,7 @@ use crate::metrics::{RunMetrics, MetricsCollector};
 use crate::render::{RenderParams, BackendKind, make_renderer_for_scene};
 
 /// Configuración de una corrida de render.
-/// Más adelante aquí se puede agregar scene_seed.
+/// `scene_seed` permite fijar la aleatoriedad de la escena (por ejemplo ManySpheres).
 pub struct RunConfig {
     pub backend: BackendKind,
     pub scene: SceneKind,
@@ -26,6 +26,10 @@ pub struct RunConfig {
     pub aspect_ratio: f64,
     pub samples_per_pixel: i32,
     pub max_depth: i32,
+    /// Semilla opcional para la construcción de la escena.
+    /// - `Some(seed)` -> escena determinista.
+    /// - `None`       -> escena con aleatoriedad "libre".
+    pub scene_seed: Option<u64>,
 }
 
 /// Helper interno para construir un identificador único de la corrida.
@@ -69,9 +73,10 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
     // ---------- Escena (World + Vec<Sphere>) ----------
     //
     // build_scene devuelve:
-    //   - world: HittableList usado por el camino escalar (igual que antes).
+    //   - world: HittableList usado por el camino escalar.
     //   - spheres: Vec<Sphere> plano usado por NEON para world_hit4_spheres.
-    let scene_data = build_scene(config.scene);
+    // `scene_seed` permite fijar la aleatoriedad (por ejemplo ManySpheres).
+    let scene_data = build_scene(config.scene, config.scene_seed);
     let world = scene_data.world;
     let spheres_for_accel = scene_data.spheres;
 
@@ -141,8 +146,9 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
         &world,
         &mut cam,
         &mut framebuffer,
+        config.scene_seed, // Se pasa el seed de la corrida
     );
-
+    
     // Altura efectiva de imagen (por si cambiara en initialize).
     let final_image_height = metrics.image_height;
 

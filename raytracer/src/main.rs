@@ -22,6 +22,7 @@ use crate::render::BackendKind;
 use crate::run::{RunConfig, execute_run};
 
 fn main() -> IoResult<()> {
+    let base_seed = 1000_u64;
     
     // Vector de RunConfigs
     let configs = vec![
@@ -29,21 +30,23 @@ fn main() -> IoResult<()> {
         // Aquí se define una sola corrida
         RunConfig {
             backend: BackendKind::Scalar,
-            scene: SceneKind::Initial,  // Initial
-            image_width: 403,       // 1200
+            scene: SceneKind::ManySpheres,      // Initial or ManySpheres
+            image_width: 403,               // 1200
             aspect_ratio: 16.0 / 9.0,
-            samples_per_pixel: 100, // 500
+            samples_per_pixel: 100,         // 500
             max_depth: 50,
+            scene_seed: Some(base_seed), // o None si no se quiere fijar
         },
         
         // Esto es otra corrida
         RunConfig {
             backend: BackendKind::Neon,
-            scene: SceneKind::Initial, //ManySpheres,
-            image_width: 403,       // 1200
+            scene: SceneKind::ManySpheres,      // Initial or ManySpheres,
+            image_width: 403,               // 1200
             aspect_ratio: 16.0 / 9.0,
-            samples_per_pixel: 100, // 500
+            samples_per_pixel: 100,         // 500
             max_depth: 50,
+            scene_seed: Some(base_seed), // mismo seed para comparar backends
         }      
 
     ];

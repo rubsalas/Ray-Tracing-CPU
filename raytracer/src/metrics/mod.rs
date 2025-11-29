@@ -18,8 +18,10 @@ pub struct RunMetrics {
     pub image_height: i32,
     pub samples_per_pixel: i32,
     pub max_depth: i32,
-    pub render_duration_ms: u128,
 
+    pub scene_seed: Option<u64>,
+    
+    pub render_duration_ms: u128,
     pub cpu_user_ms: Option<u128>,
     pub cpu_system_ms: Option<u128>,
     pub peak_memory_bytes: Option<u64>,
@@ -29,8 +31,6 @@ pub struct RunMetrics {
     pub primary_rays_total: u64,
     pub primary_rays_accelerated: u64,
     pub primary_rays_fallback: u64,
-
-    // pub scene_seed: Option<u64>, // TODO
 }
 
 impl RunMetrics {
@@ -50,8 +50,9 @@ impl RunMetrics {
             image_height,
             samples_per_pixel,
             max_depth,
+            scene_seed: None,
+            
             render_duration_ms,
-
             cpu_user_ms: None,
             cpu_system_ms: None,
             peak_memory_bytes: None,
@@ -64,10 +65,13 @@ impl RunMetrics {
     }
 }
 
-/// Encapsula la lógica de medición del render.
+/// Tipo marcador para agrupar funciones relacionadas con la medición
+/// de métricas de ejecución.
 pub struct MetricsCollector;
 
+/// Encapsula la lógica de medición del render.
 impl MetricsCollector {
+    /// Ejecuta el render y construye un `RunMetrics` con tiempos y contadores básicos.
     pub fn measure_render(
         renderer: &mut dyn Renderer,
         backend: BackendKind,
@@ -76,35 +80,57 @@ impl MetricsCollector {
         world: &dyn Hittable,
         camera: &mut Camera,
         framebuffer: &mut [Color],
+        scene_seed: Option<u64>,  // ⬅ nuevo parámetro
     ) -> RunMetrics {
+        use std::time::Instant;
+
         let start = Instant::now();
 
+        // Se ejecuta el render real.
         renderer.render(world, camera, params, framebuffer);
 
         let duration_ms = start.elapsed().as_millis();
 
-        let mut metrics = RunMetrics::new(
+        // Se construye la estructura base de métricas.
+        let mut metrics = RunMetrics {
             run_id,
             backend,
-            params.image_width,
-            camera.image_height(),
-            params.samples_per_pixel,
-            params.max_depth,
-            duration_ms,
-        );
+            image_width: params.image_width,
+            image_height: camera.image_height(),
+            samples_per_pixel: params.samples_per_pixel,
+            max_depth: params.max_depth,
 
-        // Aquí, más adelante, se podrá rellenar cpu_user_ms, etc.
+            scene_seed,
 
-        // NUEVO: si el backend es NEON, se lee NeonStats y se guardan.
-        if let BackendKind::Neon = backend {
-            if let Some(neon) = renderer.as_any().downcast_ref::<NeonRenderer>() {
-                metrics.primary_rays_total       = neon.stats.primary_rays_total;
+            render_duration_ms: duration_ms,
+            cpu_user_ms: None,
+            cpu_system_ms: None,
+            peak_memory_bytes: None,
+
+            // Valores por defecto para contadores NEON; se sobrescriben
+            // si el renderer es un NeonRenderer en aarch64.
+            primary_rays_total: 0,
+            primary_rays_accelerated: 0,
+            primary_rays_fallback: 0,
+        };
+
+        // En aarch64, si el renderer concreto es NeonRenderer,
+        // se copian los contadores internos al RunMetrics.
+        #[cfg(target_arch = "aarch64")]
+        {
+            if let Some(neon) =
+                renderer
+                    .as_any()
+                    .downcast_ref::<crate::render::neon::NeonRenderer>()
+            {
+                metrics.primary_rays_total = neon.stats.primary_rays_total;
                 metrics.primary_rays_accelerated = neon.stats.primary_rays_accelerated;
-                metrics.primary_rays_fallback    = neon.stats.primary_rays_fallback;
+                metrics.primary_rays_fallback = neon.stats.primary_rays_fallback;
             }
         }
 
         metrics
     }
 }
+
 

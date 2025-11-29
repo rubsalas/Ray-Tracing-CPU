@@ -2,64 +2,80 @@
 
 use std::rc::Rc;
 
+use rand::distributions::Uniform;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
 use crate::prelude::*;
 use crate::world::hittable_list::{HittableList, HittablePtr};
 use crate::world::sphere::Sphere;
 
-/// Alias de conveniencia para el mundo de objetos.
+/// Alias de conveniencia para el tipo de mundo.
 pub type World = HittableList;
 
 /// Tipo de escena que se quiere construir.
 #[derive(Clone, Copy, Debug)]
 pub enum SceneKind {
-    /// La escena inicial sencilla.
+    /// Escena inicial sencilla.
     Initial,
-    /// La escena grande con muchas esferas aleatorias + 3 esferas grandes.
+    /// Escena grande con muchas esferas aleatorias + 3 esferas grandes.
     ManySpheres,
-    // A futuro se podría agregar aquí:
-    // RandomSmall,
-    // CornellBox,
-    // etc.
 }
 
-/// Datos completos de una escena:
-/// - `world`: lista de objetos utilizada por el camino escalar (HittableList).
-/// - `spheres`: copia plana de las esferas, usada para aceleración NEON.
+/// Datos completos que describe una escena:
+/// - `world`: lista de objetos hittable (para el camino escalar).
+/// - `spheres`: copia plana de esferas (para el backend NEON y world_hit4_spheres).
 pub struct SceneData {
     pub world: World,
     pub spheres: Vec<Sphere>,
 }
 
-/// Construye una escena completa (World + Vec<Sphere>) según el tipo.
+/// Construye la escena completa (World + Vec<Sphere]) según el tipo y la semilla.
 ///
-/// Esta es la función “nueva” que usará:
-/// - El backend escalar → `SceneData.world`.
-/// - El backend NEON → `SceneData.spheres` (para world_hit4_spheres).
-pub fn build_scene(kind: SceneKind) -> SceneData {
+/// `scene_seed` permite fijar la aleatoriedad:
+/// - `Some(seed)` -> escena determinista.
+/// - `None`      -> escena con aleatoriedad no determinista (se usa from_entropy()).
+pub fn build_scene(kind: SceneKind, scene_seed: Option<u64>) -> SceneData {
     let mut world = HittableList::new();
-    let mut spheres: Vec<Sphere> = Vec::new();
+    let mut spheres_for_accel: Vec<Sphere> = Vec::new();
 
     match kind {
-        SceneKind::Initial => build_initial_scene(&mut world, &mut spheres),
-        SceneKind::ManySpheres => build_many_spheres_scene(&mut world, &mut spheres),
+        SceneKind::Initial => {
+            build_initial_scene(&mut world, &mut spheres_for_accel);
+        }
+        SceneKind::ManySpheres => {
+            build_many_spheres_scene(&mut world, &mut spheres_for_accel, scene_seed);
+        }
     }
 
-    SceneData { world, spheres }
+    SceneData {
+        world,
+        spheres: spheres_for_accel,
+    }
 }
 
-/// Construye solo el `World` escalar como antes.
+/// Helper interno para registrar una esfera tanto en el mundo hittable
+/// como en el vector plano de esferas para NEON.
 ///
-/// Esto mantiene compatibilidad con cualquier código que siga llamando
-/// `build_world(SceneKind)`. Por dentro simplemente delega a `build_scene`.
-pub fn build_world(kind: SceneKind) -> World {
-    build_scene(kind).world
+/// Se construye una instancia para el mundo y otra para el vector plano,
+/// compartiendo el mismo `MaterialPtr` (Rc).
+fn add_sphere_to_world_and_list(
+    world: &mut HittableList,
+    spheres: &mut Vec<Sphere>,
+    center: Point3,
+    radius: f64,
+    material: &MaterialPtr,
+) {
+    // Se crea la esfera para el mundo (envuelta en Rc y HittablePtr).
+    let world_sphere = Sphere::new(center, radius, material.clone());
+    world.add(Rc::new(world_sphere) as HittablePtr);
+
+    // Se crea la esfera para el vector plano (se comparte el mismo material Rc).
+    let accel_sphere = Sphere::new(center, radius, material.clone());
+    spheres.push(accel_sphere);
 }
 
-/// Escena inicial sencilla - Initial Scene.
-///
-/// Rellena:
-/// - `world`: HittableList usado por el raytracer.
-/// - `spheres`: copia plana de las esferas para la aceleración NEON.
+/// Escena inicial sencilla - Initial Scene
 fn build_initial_scene(world: &mut HittableList, spheres: &mut Vec<Sphere>) {
     let material_ground: MaterialPtr = Rc::new(Lambertian::new(Color::new(0.8, 0.8, 0.0)));
     let material_center: MaterialPtr = Rc::new(Lambertian::new(Color::new(0.1, 0.2, 0.5)));
@@ -67,122 +83,173 @@ fn build_initial_scene(world: &mut HittableList, spheres: &mut Vec<Sphere>) {
     let material_bubble: MaterialPtr = Rc::new(Dielectric::new(1.0 / 1.5));
     let material_right:  MaterialPtr = Rc::new(Metal::new(Color::new(0.8, 0.6, 0.2), 1.0));
 
-    // Ground
-    let s_ground = Sphere::new(
-        Point3::new( 0.0, -100.5, -1.0),
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
+        Point3::new(0.0, -100.5, -1.0),
         100.0,
-        material_ground,
+        &material_ground,
     );
-    spheres.push(s_ground.clone());
-    world.add(Rc::new(s_ground) as HittablePtr);
 
-    // Center
-    let s_center = Sphere::new(
-        Point3::new( 0.0, 0.0, -2.0),
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
+        Point3::new(0.0, 0.0, -2.0),
         0.5,
-        material_center,
+        &material_center,
     );
-    spheres.push(s_center.clone());
-    world.add(Rc::new(s_center) as HittablePtr);
 
-    // Left (outer)
-    let s_left = Sphere::new(
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
         Point3::new(-1.0, 0.0, -1.0),
         0.5,
-        material_left,
+        &material_left,
     );
-    spheres.push(s_left.clone());
-    world.add(Rc::new(s_left) as HittablePtr);
 
-    // Bubble (inner)
-    let s_bubble = Sphere::new(
+    // Esfera interna tipo "burbuja".
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
         Point3::new(-1.0, 0.0, -1.0),
         0.4,
-        material_bubble,
+        &material_bubble,
     );
-    spheres.push(s_bubble.clone());
-    world.add(Rc::new(s_bubble) as HittablePtr);
 
-    // Right
-    let s_right = Sphere::new(
-        Point3::new( 1.0, 0.0, 1.0),
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
+        Point3::new(1.0, 0.0, 1.0),
         0.5,
-        material_right,
+        &material_right,
     );
-    spheres.push(s_right.clone());
-    world.add(Rc::new(s_right) as HittablePtr);
+}
+
+/// Genera un color aleatorio con componentes en [0, 1) usando el RNG dado.
+fn random_color_unit(rng: &mut StdRng) -> Color {
+    let dist = Uniform::new(0.0_f64, 1.0_f64);
+    let r = rng.sample(dist);
+    let g = rng.sample(dist);
+    let b = rng.sample(dist);
+    Color::new(r, g, b)
+}
+
+/// Genera un color aleatorio con componentes en [min, max) usando el RNG dado.
+fn random_color_range(rng: &mut StdRng, min: f64, max: f64) -> Color {
+    let dist = Uniform::new(min, max);
+    let r = rng.sample(dist);
+    let g = rng.sample(dist);
+    let b = rng.sample(dist);
+    Color::new(r, g, b)
 }
 
 /// Escena grande con piso y muchas esferas aleatorias + 3 grandes.
 ///
-/// Igual que antes, pero ahora:
-/// - Cada Sphere que se agrega al `world` también se guarda en `spheres`.
-fn build_many_spheres_scene(world: &mut HittableList, spheres: &mut Vec<Sphere>) {
-    // Ground
-    let ground_material: MaterialPtr =
-        Rc::new(Lambertian::new(Color::new(0.5, 0.5, 0.5)));
-    let s_ground = Sphere::new(
+/// Se usa `StdRng` sembrado con `scene_seed` para que las posiciones y materiales
+/// aleatorios se mantengan deterministas siempre que la semilla sea la misma.
+fn build_many_spheres_scene(
+    world: &mut HittableList,
+    spheres: &mut Vec<Sphere>,
+    scene_seed: Option<u64>,
+) {
+    // Se construye el RNG determinista (o desde entropía si no hay semilla).
+    let mut rng: StdRng = match scene_seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => StdRng::from_entropy(),
+    };
+
+    let dist01 = Uniform::new(0.0_f64, 1.0_f64);
+    let dist_fuzz = Uniform::new(0.0_f64, 0.5_f64);
+
+    // --------- Ground ---------
+    let ground_material: MaterialPtr = Rc::new(Lambertian::new(Color::new(0.5, 0.5, 0.5)));
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
         Point3::new(0.0, -1000.0, 0.0),
         1000.0,
-        ground_material,
+        &ground_material,
     );
-    spheres.push(s_ground.clone());
-    world.add(Rc::new(s_ground) as HittablePtr);
 
-    // Small random spheres grid
+    // --------- Small random spheres grid ---------
     for a in -11..11 {
         for b in -11..11 {
-            let choose_mat = random_double(); // [0,1)
+            let choose_mat: f64 = rng.sample(dist01);
             let center = Point3::new(
-                a as f64 + 0.9 * random_double(),
+                a as f64 + 0.9 * rng.sample(dist01),
                 0.2,
-                b as f64 + 0.9 * random_double(),
+                b as f64 + 0.9 * rng.sample(dist01),
             );
 
             if (center - Point3::new(4.0, 0.2, 0.0)).length() > 0.9 {
+                // Diffuse
                 if choose_mat < 0.8 {
-                    // Diffuse
-                    let albedo = Color::random() * Color::random();
-                    let sphere_material: MaterialPtr =
-                        Rc::new(Lambertian::new(albedo));
-                    let s = Sphere::new(center, 0.2, sphere_material);
-                    spheres.push(s.clone());
-                    world.add(Rc::new(s) as HittablePtr);
+                    // albedo = random() * random()  (más oscuro)
+                    let albedo = random_color_unit(&mut rng) * random_color_unit(&mut rng);
+                    let sphere_material: MaterialPtr = Rc::new(Lambertian::new(albedo));
 
+                    add_sphere_to_world_and_list(
+                        world,
+                        spheres,
+                        center,
+                        0.2,
+                        &sphere_material,
+                    );
+
+                // Metal
                 } else if choose_mat < 0.95 {
-                    // Metal
-                    let albedo = Color::random_range(0.5, 1.0);
-                    let fuzz   = random_double_range(0.0, 0.5);
-                    let sphere_material: MaterialPtr =
-                        Rc::new(Metal::new(albedo, fuzz));
-                    let s = Sphere::new(center, 0.2, sphere_material);
-                    spheres.push(s.clone());
-                    world.add(Rc::new(s) as HittablePtr);
+                    let albedo = random_color_range(&mut rng, 0.5, 1.0);
+                    let fuzz: f64 = rng.sample(dist_fuzz);
+                    let sphere_material: MaterialPtr = Rc::new(Metal::new(albedo, fuzz));
 
+                    add_sphere_to_world_and_list(
+                        world,
+                        spheres,
+                        center,
+                        0.2,
+                        &sphere_material,
+                    );
+
+                // Glass
                 } else {
-                    // Glass
                     let sphere_material: MaterialPtr = Rc::new(Dielectric::new(1.5));
-                    let s = Sphere::new(center, 0.2, sphere_material);
-                    spheres.push(s.clone());
-                    world.add(Rc::new(s) as HittablePtr);
+                    add_sphere_to_world_and_list(
+                        world,
+                        spheres,
+                        center,
+                        0.2,
+                        &sphere_material,
+                    );
                 }
             }
         }
     }
 
-    // Three big spheres
+    // --------- Three big spheres ---------
     let material1: MaterialPtr = Rc::new(Dielectric::new(1.5));
-    let s1 = Sphere::new(Point3::new( 0.0, 1.0, 0.0), 1.0, material1);
-    spheres.push(s1.clone());
-    world.add(Rc::new(s1) as HittablePtr);
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
+        Point3::new(0.0, 1.0, 0.0),
+        1.0,
+        &material1,
+    );
 
     let material2: MaterialPtr = Rc::new(Lambertian::new(Color::new(0.4, 0.2, 0.1)));
-    let s2 = Sphere::new(Point3::new(-4.0, 1.0, 0.0), 1.0, material2);
-    spheres.push(s2.clone());
-    world.add(Rc::new(s2) as HittablePtr);
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
+        Point3::new(-4.0, 1.0, 0.0),
+        1.0,
+        &material2,
+    );
 
     let material3: MaterialPtr = Rc::new(Metal::new(Color::new(0.7, 0.6, 0.5), 0.0));
-    let s3 = Sphere::new(Point3::new( 4.0, 1.0, 0.0), 1.0, material3);
-    spheres.push(s3.clone());
-    world.add(Rc::new(s3) as HittablePtr);
+    add_sphere_to_world_and_list(
+        world,
+        spheres,
+        Point3::new(4.0, 1.0, 0.0),
+        1.0,
+        &material3,
+    );
 }
