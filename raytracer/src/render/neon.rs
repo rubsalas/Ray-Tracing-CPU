@@ -15,9 +15,11 @@
 
 use crate::prelude::*;
 use crate::camera::Camera;
-use crate::world::hittable::{Hittable, HitRecord};
-use crate::world::sphere::Sphere;
 use crate::interval::Interval;
+use crate::world::sphere::Sphere;
+use crate::metrics::core_stats::with_core_stats;
+use crate::world::hittable::{Hittable, HitRecord};
+use crate::render::primary::shade_primary_with_sphere_hint;
 
 #[cfg(target_arch = "aarch64")]
 use crate::simd::neon::{Ray4, build_primary_rays_block};
@@ -26,8 +28,6 @@ use crate::simd::hit::{HitInfo4, world_hit4_spheres};
 
 use super::{RenderParams, Renderer};
 use super::ScalarRenderer;
-
-use crate::render::primary::shade_primary_with_sphere_hint;
 
 use std::any::Any;
 
@@ -161,161 +161,144 @@ impl Renderer for NeonRenderer {
         &mut self,
         world: &dyn Hittable,
         camera: &mut Camera,
-        params: & RenderParams,
+        params: &RenderParams,
         framebuffer: &mut [Color],
     ) {
-        // Se reinicia el estado de contadores para esta corrida.
+        // Se reinician los contadores para esta corrida.
         self.stats = NeonStats::default();
 
-        // --------------------------------------------------------
-        // Camino para arquitecturas SIN NEON (no-aarch64):
-        // se delega todo al backend escalar para mantener
-        // compatibilidad y evitar dependencias de intrínsecos.
-        // --------------------------------------------------------
-        #[cfg(not(target_arch = "aarch64"))]
-        {
-            self.scalar_fallback
-                .render(world, camera, params, framebuffer);
-            return;
-        }
+        // Prepara la cámara igual que en el backend escalar.
+        camera.initialize();
 
-        // --------------------------------------------------------
-        // Camino NEON real (solo aarch64):
-        // aquí se usa Ray4, build_primary_rays_block y
-        // world_hit4_spheres para acelerar el primer rebote.
-        // --------------------------------------------------------
-        #[cfg(target_arch = "aarch64")]
-        {
-            // Se prepara la cámara igual que en el backend escalar.
-            camera.initialize();
+        let image_width        = params.image_width;
+        let image_height       = camera.image_height();
+        let samples_per_pixel  = params.samples_per_pixel;
+        let max_depth          = params.max_depth;
+        let pixel_scale        = camera.pixel_samples_scale();
 
-            let image_width       = params.image_width;
-            let image_height      = camera.image_height();
-            let samples_per_pixel = params.samples_per_pixel;
-            let max_depth         = params.max_depth;
-            let pixel_scale       = camera.pixel_samples_scale();
+        assert_eq!(
+            framebuffer.len(),
+            (image_width * image_height) as usize,
+            "framebuffer size mismatch in NeonRenderer"
+        );
 
-            assert_eq!(
-                framebuffer.len(),
-                (image_width * image_height) as usize,
-                "framebuffer size mismatch in NeonRenderer"
-            );
+        // Si no se tiene aceleración de esferas configurada,
+        // se delega todo al backend escalar para no romper nada.
+        let spheres = match &self.sphere_accel {
+            Some(v) => v,
+            None => {
+                self.scalar_fallback
+                    .render(world, camera, params, framebuffer);
+                return;
+            }
+        };
 
-            // Si no hay aceleración de esferas configurada,
-            // se delega todo al backend escalar para no alterar comportamiento.
-            let spheres = match &self.sphere_accel {
-                Some(v) => v,
-                None => {
-                    self.scalar_fallback
-                        .render(world, camera, params, framebuffer);
-                    return;
-                }
-            };
+        // Se recorre la imagen en bloques de 4 píxeles horizontales.
+        for j in 0..image_height {
+            eprint!("\rScanlines remaining (NEON): {} ", image_height - j);
+            use std::io::Write as _;
+            std::io::stderr().flush().ok();
 
-            // Se recorre la imagen en bloques de 4 píxeles horizontales.
-            for j in 0..image_height {
-                eprint!("\rScanlines remaining (NEON): {} ", image_height - j);
-                use std::io::Write as _;
-                std::io::stderr().flush().ok();
+            for i_block in (0..image_width).step_by(4) {
+                // Acumulador de color lineal por lane (para las muestras).
+                let mut lane_accum = [
+                    Color::new(0.0, 0.0, 0.0),
+                    Color::new(0.0, 0.0, 0.0),
+                    Color::new(0.0, 0.0, 0.0),
+                    Color::new(0.0, 0.0, 0.0),
+                ];
 
-                for i_block in (0..image_width).step_by(4) {
-                    // Acumulador de color lineal por lane (para las muestras).
-                    let mut lane_accum = [
-                        Color::new(0.0, 0.0, 0.0),
-                        Color::new(0.0, 0.0, 0.0),
-                        Color::new(0.0, 0.0, 0.0),
-                        Color::new(0.0, 0.0, 0.0),
-                    ];
+                // Multi-sampling por píxel.
+                for _s in 0..samples_per_pixel {
+                    // 1) Construir los 4 rayos primarios escalares y el Ray4 SIMD
+                    //    usando el helper compartido build_primary_rays_block.
+                    let (rays, ray4, lane_valid) =
+                        build_primary_rays_block(camera, j, i_block, image_width);
 
-                    // Multi-sampling por píxel.
-                    for _s in 0..samples_per_pixel {
-                        // 1) Se construyen los 4 rayos primarios escalares
-                        //    (uno por lane) usando la utilidad compartida.
-                        let (rays, lane_valid) =
-                            build_primary_rays_block(camera, i_block, j, image_width);
 
-                        // Se cuenta cuántos lanes están activos en esta muestra.
-                        let mut active_lanes = 0_u64;
-                        for lane in 0..4 {
-                            if lane_valid[lane] {
-                                active_lanes += 1;
-                            }
-                        }
-                        // Rayos primarios totales (por muestra).
-                        self.stats.primary_rays_total += active_lanes;
-
-                        // 2) Se empaquetan los 4 rayos en un Ray4 SIMD.
-                        let ray4 = Ray4::from_rays(rays);
-
-                        // 3) Se calculan intersecciones primarias vectorizadas
-                        //    usando solo esferas (world_hit4_spheres).
-                        let t_min = 0.001_f32;
-                        let t_max = f32::INFINITY;
-                        let info: HitInfo4 = world_hit4_spheres(&ray4, spheres, t_min, t_max);
-
-                        // 4) (Opcional) Chequeo de coherencia en debug:
-                        //    se compara contra un recorrido escalar equivalente.
-                        #[cfg(all(debug_assertions, target_arch = "aarch64"))]
-                        self.debug_check_world_hit4_vs_scalar(&ray4, spheres, &info);
-
-                        // Contador de lanes que realmente tienen hit acelerado.
-                        let mut accelerated_lanes = 0_u64;
-
-                        // 5) Sombreado escalar por lane, usando el hint SIMD
-                        //    para el primer rebote mediante shade_primary_with_sphere_hint.
-                        for lane in 0..4 {
-                            if !lane_valid[lane] {
-                                continue;
-                            }
-
-                            let has_primary_hit = info.hit[lane];
-                            if has_primary_hit {
-                                accelerated_lanes += 1;
-                            }
-
-                            // Color de esta muestra para este píxel / lane.
-                            let sample_color = shade_primary_with_sphere_hint(
-                                camera,
-                                world,
-                                &rays[lane],
-                                max_depth,
-                                has_primary_hit,
-                                info.sphere_index[lane],
-                                spheres,
-                            );
-
-                            lane_accum[lane] += sample_color;
-                        }
-
-                        // Se actualizan contadores por muestra.
-                        self.stats.primary_rays_accelerated += accelerated_lanes;
-                        self.stats.primary_rays_fallback += active_lanes - accelerated_lanes;
-                    }
-
-                    // 6) Al final del muestreo, se escala por 1/spp y
-                    //    se escribe al framebuffer en forma lineal.
+                    // Se cuenta cuántos lanes están activos en esta muestra.
+                    let mut active_lanes = 0_u64;
                     for lane in 0..4 {
-                        let ix = i_block + lane as i32;
-                        if ix >= image_width {
+                        if lane_valid[lane] {
+                            active_lanes += 1;
+                        }
+                    }
+                    // Rayos primarios totales (por muestra) para NEON.
+                    self.stats.primary_rays_total += active_lanes;
+
+                    // Se acumula también en los contadores lógicos globales.
+                    with_core_stats(|stats| {
+                        stats.rays_primary += active_lanes;
+                    });
+
+                    // 2) Se calculan intersecciones primarias vectorizadas
+                    //    usando solo esferas (world_hit4_spheres).
+                    let t_min = 0.001_f32;
+                    let t_max = f32::INFINITY;
+                    let info: HitInfo4 = world_hit4_spheres(&ray4, spheres, t_min, t_max);
+
+                    // 3) (Opcional) Chequeo de coherencia en debug:
+                    //    se compara contra un recorrido escalar equivalente.
+                    #[cfg(debug_assertions)]
+                    self.debug_check_world_hit4_vs_scalar(&ray4, spheres, &info);
+
+                    // Contador de lanes que realmente tienen hit acelerado.
+                    let mut accelerated_lanes = 0_u64;
+
+                    // 4) Sombreado escalar por lane, usando el hint SIMD
+                    //    para el primer rebote vía shade_primary_with_sphere_hint.
+                    for lane in 0..4 {
+                        if !lane_valid[lane] {
                             continue;
                         }
-                        let idx = (j * image_width + ix) as usize;
 
-                        // Igual que en ScalarRenderer: se deja el valor lineal ya
-                        // multiplicado por pixel_scale (= 1/samples_per_pixel).
-                        framebuffer[idx] = pixel_scale * lane_accum[lane];
+                        let has_primary_hit = info.hit[lane];
+                        if has_primary_hit {
+                            accelerated_lanes += 1;
+                        }
+
+                        // Color de esta muestra para este píxel/lane.
+                        let sample_color = shade_primary_with_sphere_hint(
+                            camera,
+                            world,
+                            &rays[lane],
+                            max_depth,
+                            has_primary_hit,
+                            info.sphere_index[lane],
+                            spheres,
+                        );
+
+                        lane_accum[lane] += sample_color;
                     }
+
+                    // Se actualizan contadores por muestra.
+                    self.stats.primary_rays_accelerated += accelerated_lanes;
+                    self.stats.primary_rays_fallback += active_lanes - accelerated_lanes;
+                }
+
+                // 5) Al final del muestreo, se escala por 1/spp y
+                //    se escribe al framebuffer en forma lineal.
+                for lane in 0..4 {
+                    let ix = i_block + lane as i32;
+                    if ix >= image_width {
+                        continue;
+                    }
+                    let idx = (j * image_width + ix) as usize;
+
+                    // Igual que en ScalarRenderer: se deja el valor lineal ya
+                    // multiplicado por pixel_scale (= 1/samples_per_pixel).
+                    framebuffer[idx] = pixel_scale * lane_accum[lane];
                 }
             }
-
-            eprintln!(
-                "\rDone (NEON primary-hit acceleration). \
-                 \n[NEON stats] primary_rays_total={}, accelerated={}, fallback={}\n",
-                self.stats.primary_rays_total,
-                self.stats.primary_rays_accelerated,
-                self.stats.primary_rays_fallback,
-            );
         }
+
+        eprintln!(
+            "\rDone (NEON primary-hit acceleration). \
+             \n[NEON stats] primary_rays_total={}, accelerated={}, fallback={}\n",
+            self.stats.primary_rays_total,
+            self.stats.primary_rays_accelerated,
+            self.stats.primary_rays_fallback,
+        );
     }
 
     fn as_any(&self) -> &dyn Any {

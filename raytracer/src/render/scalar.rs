@@ -3,6 +3,7 @@
 use crate::prelude::*;
 use crate::camera::Camera;
 use crate::world::hittable::Hittable;
+use crate::metrics::core_stats::with_core_stats;
 
 use super::{RenderParams, Renderer};
 
@@ -24,20 +25,27 @@ impl Renderer for ScalarRenderer {
         params: &RenderParams,
         framebuffer: &mut [Color],
     ) {
-        // Prepara la cámara
         camera.initialize();
 
-        let image_width = params.image_width;
-        let image_height = camera.image_height(); // calculado en initialize
-        let samples_per_pixel = params.samples_per_pixel;
-        let max_depth = params.max_depth;
-        let pixel_scale = camera.pixel_samples_scale();
+        let image_width        = params.image_width;
+        let image_height       = camera.image_height();
+        let samples_per_pixel  = params.samples_per_pixel;
+        let max_depth          = params.max_depth;
+        let pixel_scale        = camera.pixel_samples_scale();
 
         assert_eq!(
             framebuffer.len(),
             (image_width * image_height) as usize,
             "framebuffer size mismatch"
         );
+
+        // Se registra el número total de rayos primarios escalares
+        // (un rayo por muestra y por píxel válido).
+        let total_primary_rays =
+            (image_width as u64) * (image_height as u64) * (samples_per_pixel as u64);
+        with_core_stats(|stats| {
+            stats.rays_primary += total_primary_rays;
+        });
 
         for j in 0..image_height {
             eprint!("\rScanlines remaining: {} ", image_height - j);

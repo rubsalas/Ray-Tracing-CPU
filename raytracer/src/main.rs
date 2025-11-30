@@ -29,25 +29,25 @@ fn main() -> IoResult<()> {
 
         // Aquí se define una sola corrida
         RunConfig {
-            backend: BackendKind::Scalar,
-            scene: SceneKind::ManySpheres,      // Simple or ManySpheres
+            backend: BackendKind::Scalar,     // Neon or Scalar
+            scene: SceneKind::ManySpheres,  // Simple or ManySpheres
             image_width: 403,               // 1200
             aspect_ratio: 16.0 / 9.0,
             samples_per_pixel: 100,         // 500
             max_depth: 50,
-            scene_seed: Some(base_seed), // o None si no se quiere fijar
+            scene_seed: Some(base_seed),    // o None si no se quiere fijar
         },
         
         // Esto es otra corrida
-        RunConfig {
-            backend: BackendKind::Neon,
-            scene: SceneKind::ManySpheres,      // Simple or ManySpheres,
-            image_width: 403,               // 1200
-            aspect_ratio: 16.0 / 9.0,
-            samples_per_pixel: 100,         // 500
-            max_depth: 50,
-            scene_seed: Some(base_seed), // mismo seed para comparar backends
-        }      
+        // RunConfig {
+        //     backend: BackendKind::Scalar,   // Neon or Scalar
+        //     scene: SceneKind::ManySpheres,  // Simple or ManySpheres,
+        //     image_width: 403,               // 1200
+        //     aspect_ratio: 16.0 / 9.0,
+        //     samples_per_pixel: 100,         // 500
+        //     max_depth: 50,
+        //     scene_seed: Some(base_seed),    // mismo seed para comparar backends
+        // }      
 
     ];
 

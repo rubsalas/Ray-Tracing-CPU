@@ -1,3 +1,5 @@
+// src/world/material.rs
+
 //! `material` module
 //!
 //! Materials decide how rays scatter at a hit point. The base interface exposes
@@ -10,6 +12,7 @@ use std::rc::Rc;
 use crate::ray::Ray;
 use crate::prelude::*;
 use crate::world::hittable::HitRecord;
+use crate::metrics::core_stats::with_core_stats;
 
 /// Trait for shading and scattering behavior at surface hits.
 pub trait Material {
@@ -33,6 +36,16 @@ pub trait Material {
     {
         false
     }
+}
+
+/// Aproximación de Schlick para la reflectancia.
+/// 
+/// Se calcula una probabilidad de reflexión especular en función del ángulo
+/// de incidencia (`cosine`) y del índice de refracción relativo (`ref_idx`).
+fn reflectance(cosine: f64, ref_idx: f64) -> f64 {
+    let mut r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+    r0 = r0 * r0;
+    r0 + (1.0 - r0) * (1.0 - cosine).powi(5)
 }
 
 /// Shared-pointer alias for materials (single-threaded).
@@ -70,9 +83,14 @@ impl Material for Lambertian {
         attenuation: &mut Color,
         scattered: &mut Ray,
     ) -> bool {
+        // Se registra una llamada a Lambertian.
+        with_core_stats(|stats| {
+            stats.lambertian_calls += 1;
+        });
+
         let mut scatter_direction = rec.normal + Vec3::random_unit_vector();
 
-        // Catch degenerate scatter direction
+        // Se evita dirección de dispersión degenerada.
         if scatter_direction.near_zero() {
             scatter_direction = rec.normal;
         }
@@ -115,6 +133,11 @@ impl Material for Metal {
         attenuation: &mut Color,
         scattered: &mut Ray,
     ) -> bool {
+        // Se registra una llamada a Metal.
+        with_core_stats(|stats| {
+            stats.metal_calls += 1;
+        });
+
         let mut reflected = reflect(r_in.direction(), rec.normal);
         // Listing 69: normalize reflected, then add fuzz * random_unit_vector()
         reflected = unit_vector(reflected) + self.fuzz * Vec3::random_unit_vector();
@@ -141,16 +164,6 @@ impl Dielectric {
     pub fn new(eta: f64) -> Self {
         Self { refraction_index: eta }
     }
-
-    /// Schlick's approximation for reflectance.
-    #[inline]
-    fn reflectance(cosine: f64, refraction_index: f64) -> f64 {
-        // r0 = ((1 - n) / (1 + n))^2
-        let mut r0 = (1.0 - refraction_index) / (1.0 + refraction_index);
-        r0 *= r0;
-        // R(θ) ≈ r0 + (1 - r0)(1 - cosθ)^5
-        r0 + (1.0 - r0) * (1.0 - cosine).powi(5)
-    }
 }
 
 impl Material for Dielectric {
@@ -161,26 +174,38 @@ impl Material for Dielectric {
         attenuation: &mut Color,
         scattered: &mut Ray,
     ) -> bool {
-        *attenuation = Color::new(1.0, 1.0, 1.0); // no absorption in this simple model
-
-        // Relative IOR (air→material or material→air)
-        let ri = if rec.front_face { 1.0 / self.refraction_index } else { self.refraction_index };
+        let refraction_ratio = if rec.front_face {
+            1.0 / self.refraction_index
+        } else {
+            self.refraction_index
+        };
 
         let unit_direction = unit_vector(r_in.direction());
         let cos_theta = f64::min(dot(-unit_direction, rec.normal), 1.0);
         let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
 
-        // Total internal reflection?
-        let cannot_refract = ri * sin_theta > 1.0;
+        let cannot_refract = refraction_ratio * sin_theta > 1.0;
+        let use_reflection =
+            cannot_refract || reflectance(cos_theta, refraction_ratio) > random_double();
 
-        // Schlick: probabilistic reflect vs refract
-        let direction = if cannot_refract || Self::reflectance(cos_theta, ri) > random_double() {
+        // Se registra la llamada y el tipo de salida (reflexión o refracción).
+        with_core_stats(|stats| {
+            stats.dielectric_calls += 1;
+            if use_reflection {
+                stats.dielectric_reflect += 1;
+            } else {
+                stats.dielectric_refract += 1;
+            }
+        });
+
+        let direction = if use_reflection {
             reflect(unit_direction, rec.normal)
         } else {
-            refract(unit_direction, rec.normal, ri)
+            refract(unit_direction, rec.normal, refraction_ratio)
         };
 
         *scattered = Ray::new(rec.p, direction);
+        *attenuation = Color::new(1.0, 1.0, 1.0);
         true
     }
 }

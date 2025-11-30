@@ -4,8 +4,8 @@ use std::path::Path;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write, Result as IoResult};
 
-use crate::prelude::*; // Color, write_color_to, etc.
-use crate::image::color::encode_color_scalar;
+use crate::prelude::*;
+use crate::image::color::{write_color_to, encode_color_scalar};
 
 // NEON SIMD primitives are only available on aarch64 targets.
 #[cfg(target_arch = "aarch64")]
@@ -23,7 +23,7 @@ pub fn write_ppm(
     image_height: i32,
     framebuffer: &[Color],
 ) -> IoResult<()> {
-    // Ensure the parent directory exists, if any.
+    // Se asegura que el directorio padre exista.
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             create_dir_all(parent)?;
@@ -33,16 +33,18 @@ pub fn write_ppm(
     let file = File::create(path)?;
     let mut out = BufWriter::new(file);
 
-    // PPM header (P3 format).
+    // Encabezado PPM (formato P3).
     writeln!(out, "P3")?;
     writeln!(out, "{} {}", image_width, image_height)?;
     writeln!(out, "255")?;
 
+    // Orden de recorrido: j = 0..image_height, i = 0..image_width
+    // Índice lineal: idx = j * width + i
     for j in 0..image_height {
         for i in 0..image_width {
             let idx = (j * image_width + i) as usize;
             let pixel_color = framebuffer[idx];
-            // Scalar post-processing: gamma + clamp + quantize.
+            // Postprocesado escalar: gamma + clamp + cuantización.
             write_color_to(&mut out, pixel_color)?;
         }
     }
@@ -56,7 +58,7 @@ pub fn write_ppm(
 
 /// Clamps an `F32x4` to the range [`min_v`, `max_v`] lane-wise.
 ///
-/// For each lane `i`:
+/// Para cada lane `i`:
 ///   result[i] = min(max(x[i], min_v), max_v).
 #[cfg(target_arch = "aarch64")]
 #[inline]
@@ -71,27 +73,27 @@ fn clamp_f32x4(x: F32x4, min_v: f32, max_v: f32) -> F32x4 {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 fn gamma_correct_f32x4(x: F32x4) -> F32x4 {
-    // Gamma 2.0: sqrt(linear value).
+    // Gamma 2.0: sqrt(valor lineal).
     x.sqrt()
 }
 
 /// NEON-based encoder for a block of 4 linear colors.
 ///
-/// Input:
-/// - 4 `Color` values in linear space (f64, already scaled by 1/spp).
+/// Entrada:
+/// - 4 `Color` en espacio lineal (f64, ya escalados por 1/spp).
 ///
-/// Output:
-/// - 4 `(u8, u8, u8)` tuples ready to be written to a PPM file.
+/// Salida:
+/// - 4 tuplas `(u8, u8, u8)` listas para escribir en el PPM.
 ///
-/// Steps (mirroring `encode_color_scalar` as closely as possible):
-/// 1) Extract linear R,G,B components as `f32`.
-/// 2) Pack them into three `F32x4` vectors (one per channel).
-/// 3) Apply gamma correction with gamma = 2.0.
-/// 4) Clamp each channel to [0.0, 0.999] in SIMD.
-/// 5) Scale by 256 and convert to `u8` lane-wise.
+/// Pasos (imitando `encode_color_scalar`):
+/// 1) Extraer R,G,B lineales como `f32`.
+/// 2) Empaquetar en tres `F32x4` (un canal por vector).
+/// 3) Aplicar corrección gamma 2.0.
+/// 4) Clampear cada canal a [0.0, 0.999].
+/// 5) Multiplicar por 256 y convertir a `u8`.
 #[cfg(target_arch = "aarch64")]
 fn encode_color_block_neon(colors: [Color; 4]) -> [(u8, u8, u8); 4] {
-    // 1) Extract components as f32 arrays.
+    // 1) Extraer componentes como f32.
     let mut rs = [0.0f32; 4];
     let mut gs = [0.0f32; 4];
     let mut bs = [0.0f32; 4];
@@ -102,22 +104,22 @@ fn encode_color_block_neon(colors: [Color; 4]) -> [(u8, u8, u8); 4] {
         bs[i] = colors[i].z as f32;
     }
 
-    // 2) Pack into F32x4 vectors, one per channel.
+    // 2) Empaquetar en F32x4 por canal.
     let r_vec = F32x4::from_array(rs);
     let g_vec = F32x4::from_array(gs);
     let b_vec = F32x4::from_array(bs);
 
-    // 3) Gamma correction on all lanes.
+    // 3) Gamma en todos los lanes.
     let r_gamma = gamma_correct_f32x4(r_vec);
     let g_gamma = gamma_correct_f32x4(g_vec);
     let b_gamma = gamma_correct_f32x4(b_vec);
 
-    // 4) Clamp to [0.0, 0.999] in SIMD.
+    // 4) Clamp a [0.0, 0.999].
     let r_clamped = clamp_f32x4(r_gamma, 0.0, 0.999);
     let g_clamped = clamp_f32x4(g_gamma, 0.0, 0.999);
     let b_clamped = clamp_f32x4(b_gamma, 0.0, 0.999);
 
-    // 5) Convert back to arrays and quantize to 0..255 as u8.
+    // 5) Volver a arrays y cuantizar a 0..255.
     let r_arr = r_clamped.to_array();
     let g_arr = g_clamped.to_array();
     let b_arr = b_clamped.to_array();
@@ -133,16 +135,13 @@ fn encode_color_block_neon(colors: [Color; 4]) -> [(u8, u8, u8); 4] {
     out
 }
 
-/// Writes a PPM image using NEON SIMD for color post-processing (gamma + clamp)
-/// in blocks of 4 pixels, and falls back to the scalar encoder for any "tail"
-/// pixels at the end of each row.
+/// PPM writer usando NEON para el postprocesado (gamma + clamp) en bloques
+/// de 4 píxeles, con cola escalar para los píxeles restantes.
 ///
-/// Used when:
-/// - Backend = Neon, and
-/// - Target architecture = aarch64.
-///
-/// It is designed to produce output that is as close as possible to the
-/// scalar `write_ppm` path.
+/// IMPORTANTE: recorre la imagen en el **mismo orden** que `write_ppm`:
+/// - `j` de 0 a `image_height - 1`
+/// - `i` de 0 a `image_width - 1`
+/// - índice lineal: `idx = j * image_width + i_lane`
 #[cfg(target_arch = "aarch64")]
 pub fn write_ppm_neon(
     path: &Path,
@@ -150,7 +149,7 @@ pub fn write_ppm_neon(
     image_height: i32,
     framebuffer: &[Color],
 ) -> IoResult<()> {
-    // Ensure the parent directory exists, same as in write_ppm.
+    // Se asegura que el directorio padre exista.
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             create_dir_all(parent)?;
@@ -160,7 +159,7 @@ pub fn write_ppm_neon(
     let file = File::create(path)?;
     let mut out = BufWriter::new(file);
 
-    // PPM header (P3 format).
+    // Encabezado PPM (P3).
     writeln!(out, "P3")?;
     writeln!(out, "{} {}", image_width, image_height)?;
     writeln!(out, "255")?;
@@ -168,26 +167,23 @@ pub fn write_ppm_neon(
     let width = image_width;
     let height = image_height;
 
-    // Sanity check: framebuffer size must match width * height.
     assert_eq!(
         framebuffer.len(),
         (width * height) as usize,
         "framebuffer size mismatch in write_ppm_neon"
     );
 
-    // Iterate over rows (scanlines).
+    // Mismo patrón de recorrido que el writer escalar.
     for j in 0..height {
-        let row_start = j * width;
         let mut i = 0;
 
-        // Process as many full 4-pixel blocks as possible using NEON.
+        // Bloques de 4 píxeles con NEON.
         while i + 3 < width {
-            let idx0 = (row_start + i) as usize;
-            let idx1 = (row_start + i + 1) as usize;
-            let idx2 = (row_start + i + 2) as usize;
-            let idx3 = (row_start + i + 3) as usize;
+            let idx0 = (j * width + i) as usize;
+            let idx1 = (j * width + i + 1) as usize;
+            let idx2 = (j * width + i + 2) as usize;
+            let idx3 = (j * width + i + 3) as usize;
 
-            // Load 4 linear colors from the framebuffer.
             let block = [
                 framebuffer[idx0],
                 framebuffer[idx1],
@@ -195,10 +191,8 @@ pub fn write_ppm_neon(
                 framebuffer[idx3],
             ];
 
-            // Encode the 4 pixels in parallel (gamma + clamp + quantize).
             let encoded = encode_color_block_neon(block);
 
-            // Write each encoded pixel as a PPM line "R G B".
             for (r, g, b) in encoded.iter() {
                 writeln!(out, "{} {} {}", r, g, b)?;
             }
@@ -206,11 +200,9 @@ pub fn write_ppm_neon(
             i += 4;
         }
 
-        // Tail: if the row width is not a multiple of 4, there can be
-        // 1 to 3 remaining pixels. We process those using the scalar
-        // reference encoder to keep the logic simple and safe.
+        // Cola 1–3 píxeles con encoder escalar.
         while i < width {
-            let idx = (row_start + i) as usize;
+            let idx = (j * width + i) as usize;
             let (r, g, b) = encode_color_scalar(framebuffer[idx]);
             writeln!(out, "{} {} {}", r, g, b)?;
             i += 1;
@@ -228,9 +220,8 @@ mod tests {
     use crate::image::color::encode_color_scalar;
     use crate::prelude::Color;
 
-    /// Helper: returns true if the difference between two u8
-    /// values is at most 1. We allow a tolerance of 1 to account
-    /// for tiny differences between f32 and f64 computations.
+    /// Se considera que dos u8 son equivalentes si difieren a lo sumo en 1.
+    /// Esto permite pequeñas diferencias de redondeo f32 vs f64.
     fn close_u8(a: u8, b: u8) -> bool {
         let da = a as i16;
         let db = b as i16;
@@ -239,7 +230,6 @@ mod tests {
 
     #[test]
     fn encode_color_block_neon_matches_scalar_for_basic_colors() {
-        // Four representative colors in linear space [0,1].
         let c0 = Color::new(0.0, 0.0, 0.0);
         let c1 = Color::new(0.25, 0.5, 0.75);
         let c2 = Color::new(0.5, 0.5, 0.5);
@@ -247,17 +237,13 @@ mod tests {
 
         let colors = [c0, c1, c2, c3];
 
-        // Scalar reference: encode each color independently.
         let mut scalar_encoded = [(0u8, 0u8, 0u8); 4];
         for i in 0..4 {
             scalar_encoded[i] = encode_color_scalar(colors[i]);
         }
 
-        // NEON version: encode the four colors in one block.
         let neon_encoded = encode_color_block_neon(colors);
 
-        // Compare lane by lane, allowing a difference of at most 1
-        // per channel to account for f32 vs f64 rounding.
         for i in 0..4 {
             let (sr, sg, sb) = scalar_encoded[i];
             let (nr, ng, nb) = neon_encoded[i];

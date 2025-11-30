@@ -138,7 +138,7 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
     );
 
     // Se mide el render con MetricsCollector.
-    let metrics: RunMetrics = MetricsCollector::measure_render(
+    let mut metrics: RunMetrics = MetricsCollector::measure_render(
         renderer.as_mut(), // &mut dyn Renderer
         backend_kind,
         run_id.clone(),
@@ -146,8 +146,11 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
         &world,
         &mut cam,
         &mut framebuffer,
-        config.scene_seed, // Se pasa el seed de la corrida
     );
+
+
+    // Se asocia la semilla de escena a las métricas de esta corrida.
+    metrics.scene_seed = config.scene_seed;
     
     // Altura efectiva de imagen (por si cambiara en initialize).
     let final_image_height = metrics.image_height;

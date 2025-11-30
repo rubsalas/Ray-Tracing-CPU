@@ -4,13 +4,14 @@ pub mod scalar;
 pub mod neon;
 pub mod primary;
 
+use crate::prelude::*;
 use crate::camera::Camera;
-use crate::prelude::*;               // Color, etc.
-use crate::world::hittable::Hittable;
 use crate::world::sphere::Sphere;
+use crate::world::hittable::Hittable;
+pub use neon::NeonRenderer;
+
 
 use scalar::ScalarRenderer;
-use neon::NeonRenderer;
 
 use std::any::Any;
 

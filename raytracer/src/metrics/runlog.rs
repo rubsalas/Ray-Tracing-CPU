@@ -39,5 +39,66 @@ pub fn write_metrics_to_file(path: &Path, metrics: &RunMetrics) -> IoResult<()> 
     writeln!(out, "primary_rays_accelerated: {}", metrics.primary_rays_accelerated)?;
     writeln!(out, "primary_rays_fallback: {}", metrics.primary_rays_fallback)?;
 
+    // Contadores lógicos comunes (CoreStats)
+    writeln!(out, "core_rays_primary: {}", metrics.core_stats.rays_primary)?;
+
+    writeln!(
+        out,
+        "core_scalar_intersection_tests: {}",
+        metrics.core_stats.scalar_intersection_tests
+    )?;
+    writeln!(
+        out,
+        "core_scalar_intersection_hits: {}",
+        metrics.core_stats.scalar_intersection_hits
+    )?;
+    writeln!(
+        out,
+        "core_scalar_intersection_misses: {}",
+        metrics.core_stats.scalar_intersection_misses
+    )?;
+
+    writeln!(
+        out,
+        "core_simd_intersection_tests: {}",
+        metrics.core_stats.simd_intersection_tests
+    )?;
+    writeln!(
+        out,
+        "core_simd_intersection_hits_lanes: {}",
+        metrics.core_stats.simd_intersection_hits_lanes
+    )?;
+    writeln!(
+        out,
+        "core_simd_intersection_misses_lanes: {}",
+        metrics.core_stats.simd_intersection_misses_lanes
+    )?;
+
+    writeln!(
+        out,
+        "core_lambertian_calls: {}",
+        metrics.core_stats.lambertian_calls
+    )?;
+    writeln!(
+        out,
+        "core_metal_calls: {}",
+        metrics.core_stats.metal_calls
+    )?;
+    writeln!(
+        out,
+        "core_dielectric_calls: {}",
+        metrics.core_stats.dielectric_calls
+    )?;
+    writeln!(
+        out,
+        "core_dielectric_reflect: {}",
+        metrics.core_stats.dielectric_reflect
+    )?;
+    writeln!(
+        out,
+        "core_dielectric_refract: {}",
+        metrics.core_stats.dielectric_refract
+    )?;
+
     Ok(())
 }

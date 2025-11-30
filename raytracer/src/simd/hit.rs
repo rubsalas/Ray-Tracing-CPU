@@ -6,8 +6,9 @@
 //! In this phase we focus on sphere intersection for four rays in parallel,
 //! returning per-lane hit information in a compact struct.
 
-use crate::simd::neon::{F32x4, Vec3x4, Ray4};
 use crate::world::sphere::Sphere;
+use crate::simd::neon::{F32x4, Vec3x4, Ray4};
+use crate::metrics::core_stats::with_core_stats;
 
 /// Per-lane hit information for a batch of four rays.
 ///
@@ -189,41 +190,54 @@ pub fn world_hit4_spheres(
     t_min: f32,
     t_max: f32,
 ) -> HitInfo4 {
-    // Start with "no hit" for all lanes, and t initialized to t_max.
-    // This is equivalent to the scalar pattern of:
-    //     let mut hit_any = false;
-    //     let mut closest_so_far = t_max;
-    let mut best = HitInfo4::no_hit(t_max);
+    let lane_count = 4_u64;
+    let num_spheres = spheres.len() as u64;
 
-    // Enumerate all spheres in the world and test them against the 4 rays.
+    // Se registra el número total de tests vectorizados aproximados:
+    // se considera que cada esfera se prueba contra los 4 lanes.
+    with_core_stats(|stats| {
+        stats.simd_intersection_tests += num_spheres * lane_count;
+    });
+
+    let mut best_t = [t_max; 4];
+    let mut best_idx = [-1_i32; 4];
+    let mut hit_mask = [false; 4];
+
     for (idx, sphere) in spheres.iter().enumerate() {
-        let sphere_index = idx as i32;
+        let candidate = hit_sphere4(ray4, sphere, t_min, t_max, idx as i32);
 
-        // SIMD intersection with this single sphere for all 4 rays.
-        let info = hit_sphere4(ray4, sphere, t_min, t_max, sphere_index);
-
-        // For each lane 0..3, decide if this sphere is a better hit than
-        // what we had previously stored in `best`.
         for lane in 0..4 {
-            // If this lane didn't hit this sphere, skip it.
-            if !info.hit[lane] {
-                continue;
-            }
-
-            let candidate_t = info.t[lane];
-
-            // If we had no hit before on this lane, or this t is smaller
-            // (i.e., closer to the ray origin), we update the best info.
-            if !best.hit[lane] || candidate_t < best.t[lane] {
-                best.hit[lane] = true;
-                best.t[lane] = candidate_t;
-                best.sphere_index[lane] = sphere_index;
+            if candidate.hit[lane] && candidate.t[lane] < best_t[lane] {
+                best_t[lane] = candidate.t[lane];
+                best_idx[lane] = idx as i32;
+                hit_mask[lane] = true;
             }
         }
     }
 
-    best
+    // Se cuentan hits y misses por lane.
+    let mut hits_lanes = 0_u64;
+    let mut misses_lanes = 0_u64;
+    for lane in 0..4 {
+        if hit_mask[lane] {
+            hits_lanes += 1;
+        } else {
+            misses_lanes += 1;
+        }
+    }
+
+    with_core_stats(|stats| {
+        stats.simd_intersection_hits_lanes += hits_lanes;
+        stats.simd_intersection_misses_lanes += misses_lanes;
+    });
+
+    HitInfo4 {
+        t: best_t,
+        hit: hit_mask,
+        sphere_index: best_idx,
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
