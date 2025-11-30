@@ -10,15 +10,19 @@ use crate::prelude::*;
 use crate::world::hittable_list::{HittableList, HittablePtr};
 use crate::world::sphere::Sphere;
 
+use serde::Deserialize;
+
 /// Alias de conveniencia para el tipo de mundo.
 pub type World = HittableList;
 
 /// Tipo de escena que se quiere construir.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 pub enum SceneKind {
     /// Escena sencilla con pocas esferas.
+    #[serde(rename = "simple")]
     Simple,
     /// Escena grande con muchas esferas aleatorias + 3 esferas grandes.
+    #[serde(rename = "many_spheres")]
     ManySpheres,
 }
 

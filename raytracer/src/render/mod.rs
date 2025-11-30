@@ -10,13 +10,15 @@ use crate::world::sphere::Sphere;
 use crate::world::hittable::Hittable;
 pub use neon::NeonRenderer;
 
-
 use scalar::ScalarRenderer;
 
 use std::any::Any;
 
+use serde::Deserialize;
+
 /// Tipo de backend de render que se va a utilizar.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     /// Camino completamente escalar.
     Scalar,

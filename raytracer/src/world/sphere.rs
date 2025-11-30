@@ -14,9 +14,9 @@
 use crate::ray::Ray;
 use crate::interval::Interval;
 use crate::vec3::{dot, Point3};
-use crate::world::material::MaterialPtr;
 use crate::metrics::core_stats::with_core_stats;
 use crate::world::hittable::{HitRecord, Hittable};
+use crate::world::material::{MaterialPtr, MaterialKind};
 
 /// Solid sphere defined by a `center` and a non-negative `radius`.
 #[derive(Clone)]
@@ -27,6 +27,12 @@ pub struct Sphere {
 }
 
 impl Sphere {
+    /// Devuelve el tipo de material asociado a esta esfera.
+    #[inline]
+    pub fn material_kind(&self) -> MaterialKind {
+        self.mat.kind()
+    }
+    
     /// Creates a sphere with center, non-negative radius, and a material.
     pub fn new(center: Point3, radius: f64, mat: MaterialPtr) -> Self {
         Self {

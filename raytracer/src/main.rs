@@ -1,57 +1,48 @@
 mod ray;
+mod run;
+mod simd;
 mod vec3;
-mod camera;
-mod interval;
-mod prelude;
-
 mod image;
 mod world;
-
+mod scene;
+mod camera;
+mod config;
 mod render;
 mod metrics;
-mod scene;
-mod run;
-
-mod simd;
-
+mod prelude;
+mod interval;
 
 use std::io::Result as IoResult;
+use std::env;
+use std::path::Path;
 
-use crate::scene::SceneKind;
-use crate::render::BackendKind;
 use crate::run::{RunConfig, execute_run};
 
 fn main() -> IoResult<()> {
-    let base_seed = 1000_u64;
-    
-    // Vector de RunConfigs
-    let configs = vec![
+    // Se obtienen los argumentos de línea de comandos.
+    // Ejemplo de uso:
+    //     cargo run --release -- config/runs_example.json
+    //
+    // args[0] = nombre del binario
+    // args[1] = ruta al archivo de configuración (si existe)
+    let args: Vec<String> = env::args().collect();
 
-        // Aquí se define una sola corrida
-        RunConfig {
-            backend: BackendKind::Scalar,     // Neon or Scalar
-            scene: SceneKind::ManySpheres,  // Simple or ManySpheres
-            image_width: 403,               // 1200
-            aspect_ratio: 16.0 / 9.0,
-            samples_per_pixel: 100,         // 500
-            max_depth: 50,
-            scene_seed: Some(base_seed),    // o None si no se quiere fijar
-        },
-        
-        // Esto es otra corrida
-        // RunConfig {
-        //     backend: BackendKind::Scalar,   // Neon or Scalar
-        //     scene: SceneKind::ManySpheres,  // Simple or ManySpheres,
-        //     image_width: 403,               // 1200
-        //     aspect_ratio: 16.0 / 9.0,
-        //     samples_per_pixel: 100,         // 500
-        //     max_depth: 50,
-        //     scene_seed: Some(base_seed),    // mismo seed para comparar backends
-        // }      
+    // Se determina la ruta del archivo de configuración.
+    // Si el usuario pasa un argumento, se usa ese.
+    // Si no pasa nada, se usa un archivo por defecto en `config/runs.json`.
+    let config_path: &str = if args.len() >= 2 {
+        &args[1]
+    } else {
+        "config/runs.json"
+    };
 
-    ];
+    // Se imprime la ruta usada para facilitar depuración.
+    eprintln!("Usando archivo de configuración: {}", config_path);
 
-    // Hace que se ejecuten todas las corridas
+    // Se carga el archivo de configuración y se obtienen los RunConfig.
+    let configs: Vec<RunConfig> = config::load_runs_from_file(Path::new(config_path))?;
+
+    // Se ejecutan todas las corridas definidas en el archivo.
     for cfg in configs {
         execute_run(&cfg)?;
     }

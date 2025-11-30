@@ -1,0 +1,23 @@
+{
+    "runs": [
+      {
+        "backend": "neon",
+        "scene": "many_spheres",
+        "image_width": 403,
+        "aspect_ratio": 1.7777778,
+        "samples_per_pixel": 100,
+        "max_depth": 50,
+        "scene_seed": 6789
+      },
+      {
+        "backend": "scalar",
+        "scene": "many_spheres",
+        "image_width": 403,
+        "aspect_ratio": 1.7777778,
+        "samples_per_pixel": 100,
+        "max_depth": 50,
+        "scene_seed": 6789
+      }
+    ]
+  }
+  

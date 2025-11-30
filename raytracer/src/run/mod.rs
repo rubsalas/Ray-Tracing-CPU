@@ -4,6 +4,7 @@ use std::path::Path;
 use std::io::Result as IoResult;
 
 use chrono::Local;
+use serde::Deserialize;
 
 use crate::prelude::*;
 use crate::camera::Camera;
@@ -17,8 +18,12 @@ use crate::metrics::{RunMetrics, MetricsCollector};
 
 use crate::render::{RenderParams, BackendKind, make_renderer_for_scene};
 
+use crate::world::sphere::Sphere;
+use crate::world::material::MaterialKind;
+
 /// Configuración de una corrida de render.
 /// `scene_seed` permite fijar la aleatoriedad de la escena (por ejemplo ManySpheres).
+#[derive(Debug, Deserialize)]
 pub struct RunConfig {
     pub backend: BackendKind,
     pub scene: SceneKind,
@@ -61,6 +66,37 @@ fn build_run_id(
     )
 }
 
+/// Cuenta cuántas esferas hay en total en la escena y cuántas hay
+/// de cada tipo de material conocido.
+///
+/// Parameters:
+/// - `spheres`: slice de esferas planas usadas para aceleración.
+///
+/// Returns:
+/// - tupla (total, lambertian, metal, dielectric)
+fn compute_sphere_material_counts(spheres: &[Sphere]) -> (u64, u64, u64, u64) {
+    let mut total: u64 = 0;
+    let mut lambertian: u64 = 0;
+    let mut metal: u64 = 0;
+    let mut dielectric: u64 = 0;
+
+    for s in spheres {
+        total += 1;
+
+        match s.material_kind() {
+            MaterialKind::Lambertian => lambertian += 1,
+            MaterialKind::Metal      => metal += 1,
+            MaterialKind::Dielectric => dielectric += 1,
+            MaterialKind::Other      => {
+                // Se dejan otros materiales fuera del desglose específico.
+            }
+        }
+    }
+
+    (total, lambertian, metal, dielectric)
+}
+
+
 /// Ejecuta una corrida completa:
 /// - Construye la escena según el tipo (World + Vec<Sphere>).
 /// - Configura la cámara.
@@ -79,6 +115,14 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
     let scene_data = build_scene(config.scene, config.scene_seed);
     let world = scene_data.world;
     let spheres_for_accel = scene_data.spheres;
+
+    // Se cuentan las esferas por tipo de material para las métricas.
+    let (
+        scene_spheres_total,
+        scene_spheres_lambertian,
+        scene_spheres_metal,
+        scene_spheres_dielectric,
+    ) = compute_sphere_material_counts(&spheres_for_accel);
 
     // ---------- Camera ----------
     let mut cam = Camera::new(config.image_width, config.aspect_ratio);
@@ -151,6 +195,12 @@ pub fn execute_run(config: &RunConfig) -> IoResult<RunMetrics> {
 
     // Se asocia la semilla de escena a las métricas de esta corrida.
     metrics.scene_seed = config.scene_seed;
+
+    // Se rellenan las estadísticas de escena con los conteos calculados.
+    metrics.scene_spheres_total = scene_spheres_total;
+    metrics.scene_spheres_lambertian = scene_spheres_lambertian;
+    metrics.scene_spheres_metal = scene_spheres_metal;
+    metrics.scene_spheres_dielectric = scene_spheres_dielectric;
     
     // Altura efectiva de imagen (por si cambiara en initialize).
     let final_image_height = metrics.image_height;

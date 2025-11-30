@@ -14,8 +14,26 @@ use crate::prelude::*;
 use crate::world::hittable::HitRecord;
 use crate::metrics::core_stats::with_core_stats;
 
+/// Tipo de material usado para estadísticas de escena.
+#[derive(Clone, Copy, Debug)]
+pub enum MaterialKind {
+    Lambertian,
+    Metal,
+    Dielectric,
+    /// Cualquier otro material que no se clasifique explícitamente.
+    Other,
+}
+
 /// Trait for shading and scattering behavior at surface hits.
 pub trait Material {
+    /// Devuelve el tipo de material para fines de estadística.
+    ///
+    /// El valor por defecto devuelve `MaterialKind::Other`, y las
+    /// implementaciones concretas lo sobreescriben.
+    fn kind(&self) -> MaterialKind {
+        MaterialKind::Other
+    }
+
     /// Computes the scattered ray and its attenuation.
     ///
     /// * `r_in` — incoming ray
@@ -69,6 +87,10 @@ impl Lambertian {
 }
 
 impl Material for Lambertian {
+    fn kind(&self) -> MaterialKind {
+        MaterialKind::Lambertian
+    }
+
     /// Scatter by choosing a random hemisphere direction about the hit normal.
     ///
     /// - `scattered.origin = rec.p`
@@ -124,6 +146,10 @@ impl Metal {
 }
 
 impl Material for Metal {
+    fn kind(&self) -> MaterialKind {
+        MaterialKind::Metal
+    }
+
     /// Reflect about the normal, then add fuzzy noise, and accept only if
     /// the scattered ray still goes outward (`dot(dir, normal) > 0`).
     fn scatter(
@@ -167,6 +193,10 @@ impl Dielectric {
 }
 
 impl Material for Dielectric {
+    fn kind(&self) -> MaterialKind {
+        MaterialKind::Dielectric
+    }
+    
     fn scatter(
         &self,
         r_in: &Ray,

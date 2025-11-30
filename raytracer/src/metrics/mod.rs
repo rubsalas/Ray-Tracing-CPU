@@ -5,7 +5,6 @@ use std::time::Instant;
 use crate::vec3::Color;
 use crate::camera::Camera;
 use crate::world::hittable::Hittable;
-use crate::render::neon::NeonRenderer;
 use crate::render::{RenderParams, BackendKind, Renderer};
 
 use self::core_stats::{CoreStats, reset_core_stats, snapshot_core_stats};
@@ -25,9 +24,12 @@ pub struct RunMetrics {
     pub scene_seed: Option<u64>,
     
     pub render_duration_ms: u128,
-    pub cpu_user_ms: Option<u128>,
-    pub cpu_system_ms: Option<u128>,
-    pub peak_memory_bytes: Option<u64>,
+
+    // Estadísticas estáticas de la escena (conteo de esferas por material).
+    pub scene_spheres_total: u64,
+    pub scene_spheres_lambertian: u64,
+    pub scene_spheres_metal: u64,
+    pub scene_spheres_dielectric: u64,
 
     // Contadores específicos del backend NEON.
     // Para el backend escalar se mantienen en 0.
@@ -56,19 +58,23 @@ impl RunMetrics {
             image_height,
             samples_per_pixel,
             max_depth,
+            // Se rellena después en execute_run con config.scene_seed.
             scene_seed: None,
 
             render_duration_ms,
-            cpu_user_ms: None,
-            cpu_system_ms: None,
-            peak_memory_bytes: None,
 
-            // Por defecto, counters en 0.
+            // Por defecto, estadísticas de escena en 0.
+            scene_spheres_total: 0,
+            scene_spheres_lambertian: 0,
+            scene_spheres_metal: 0,
+            scene_spheres_dielectric: 0,
+
+            // Por defecto, counters NEON en 0.
             primary_rays_total: 0,
             primary_rays_accelerated: 0,
             primary_rays_fallback: 0,
 
-            // NUEVO: stats lógicos por defecto.
+            // Stats lógicos por defecto.
             core_stats: CoreStats::default(),
         }
     }
@@ -138,21 +144,25 @@ impl MetricsCollector {
             image_height,
             samples_per_pixel: params.samples_per_pixel,
             max_depth: params.max_depth,
-
+        
             // Se rellena en execute_run con config.scene_seed.
             scene_seed: None,
-
+        
             render_duration_ms,
-            cpu_user_ms: None,
-            cpu_system_ms: None,
-            peak_memory_bytes: None,
-
+        
+            // Se rellenan en execute_run con los conteos de la escena.
+            scene_spheres_total: 0,
+            scene_spheres_lambertian: 0,
+            scene_spheres_metal: 0,
+            scene_spheres_dielectric: 0,
+        
             primary_rays_total,
             primary_rays_accelerated,
             primary_rays_fallback,
-
+        
             core_stats,
         }
+        
     }
 }
 
