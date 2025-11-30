@@ -20,3 +20,4 @@ target
 # No incluir el folder de los outputs
 output
 runs
+perf_metrics

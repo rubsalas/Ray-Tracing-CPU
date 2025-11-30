@@ -1,0 +1,14 @@
+{
+    "runs": [
+      {
+        "backend": "neon",
+        "scene": "simple",
+        "image_width": 400,
+        "aspect_ratio": 1.7777778,
+        "samples_per_pixel": 100,
+        "max_depth": 50,
+        "scene_seed": 1000
+      }
+    ]
+  }
+  
