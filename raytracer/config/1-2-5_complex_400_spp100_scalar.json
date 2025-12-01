@@ -1,8 +1,8 @@
 {
     "runs": [
       {
-        "backend": "neon",
-        "scene": "simple",
+        "backend": "scalar",
+        "scene": "many_spheres",
         "image_width": 400,
         "aspect_ratio": 1.7777778,
         "samples_per_pixel": 100,
@@ -11,4 +11,3 @@
       }
     ]
   }
-  

@@ -146,7 +146,7 @@ Esto genera, para esa corrida:
 
 - Una imagen en formato PPM en el folder output/.
 
--Un archivo de métricas de texto en el directorio runs/.
+- Un archivo de métricas de texto en el directorio runs/.
 
 
 ### 3.2. Configuración de varias corridas (runs_example.json)
@@ -199,7 +199,7 @@ Si se ejecuta simplemente:
 cargo run --release
 ```
 
-el programa usa internamente una configuración predefinida equivalente a cargar un JSON por defecto (con backend, resolución, escena y parámetros fijados en el archivo config/runs.json).
+El programa usa internamente una configuración predefinida equivalente a cargar un JSON por defecto (con backend, resolución, escena y parámetros fijados en el archivo config/runs.json).
 Es decir, aunque no se pase un archivo .json en la línea de comandos, la ejecución sigue el mismo flujo lógico que una corrida definida, solo que con una configuración predeterminada.
 
 
@@ -268,74 +268,71 @@ Explicación de cada bloque
 
 Cabecera:
 
-run_id: identificador único de la corrida.
-Normalmente incluye fecha/hora, backend, resolución y samples por píxel.
-Sirve para relacionar: imagen, métricas internas y métricas de perf.
+- run_id: identificador único de la corrida.Normalmente incluye fecha/hora, backend, resolución y samples por píxel. Sirve para relacionar: imagen, métricas internas y métricas de perf.
 
-backend: backend usado (Neon o Scalar).
+- backend: backend usado (Neon o Scalar).
 
-image_width / image_height: resolución final en píxeles.
+- image_width / image_height: resolución final en píxeles.
 
-samples_per_pixel: número de muestras por píxel.
+- samples_per_pixel: número de muestras por píxel.
 
-max_depth: profundidad máxima de rayos (rebotes).
+- max_depth: profundidad máxima de rayos (rebotes).
 
-scene_seed: semilla utilizada en la generación de la escena / aleatoriedad.
+- scene_seed: semilla utilizada en la generación de la escena / aleatoriedad.
 
 
 [timing]
 
-render_duration_ms: tiempo total de render en milisegundos (solo CPU del render principal).
+- render_duration_ms: tiempo total de render en milisegundos (solo CPU del render principal).
 
 
 [neon_stats] (solo si se usa backend Neon)
 
-primary_rays_total: número total de rayos primarios (cámara).
-Suele ser: image_width * image_height * samples_per_pixel.
+- primary_rays_total: número total de rayos primarios (cámara). Suele ser: image_width * image_height * samples_per_pixel.
 
-primary_rays_accelerated: rayos primarios procesados por el camino acelerado NEON.
+- primary_rays_accelerated: rayos primarios procesados por el camino acelerado NEON.
 
-primary_rays_fallback: rayos primarios que terminaron usando el camino escalar (por límites de alineamiento, borde de escena, etc.).
+- primary_rays_fallback: rayos primarios que terminaron usando el camino escalar (por límites de alineamiento, borde de escena, etc.).
 
 
 [scene_spheres]
 
-scene_spheres_total: cantidad total de esferas en la escena.
+- scene_spheres_total: cantidad total de esferas en la escena.
 
-scene_spheres_lambertian: esferas con material difuso.
+- scene_spheres_lambertian: esferas con material difuso.
 
-scene_spheres_metal: esferas metálicas.
+- scene_spheres_metal: esferas metálicas.
 
-scene_spheres_dielectric: esferas dieléctricas (vidrio, etc.).
+- scene_spheres_dielectric: esferas dieléctricas (vidrio, etc.).
 
 Sirve para documentar la complejidad geométrica y material de la escena.
 
 
 [core_stats]
 
-core_rays_primary: igual que primary_rays_total; número de rayos de cámara lanzados.
+- core_rays_primary: igual que primary_rays_total; número de rayos de cámara lanzados.
 
-core_scalar_intersection_tests: cantidad de pruebas de intersección en código escalar.
+- core_scalar_intersection_tests: cantidad de pruebas de intersección en código escalar.
 
-core_scalar_intersection_hits: número de intersecciones exitosas en el camino escalar.
+- core_scalar_intersection_hits: número de intersecciones exitosas en el camino escalar.
 
-core_scalar_intersection_misses: número de pruebas escalar que no dieron intersección.
+- core_scalar_intersection_misses: número de pruebas escalar que no dieron intersección.
 
-core_simd_intersection_tests: cantidad de pruebas vectoriales (NEON) lanzadas.
+- core_simd_intersection_tests: cantidad de pruebas vectoriales (NEON) lanzadas.
 
-core_simd_intersection_hits_lanes: hits a nivel de lanes SIMD (cuántos lanes tuvieron intersección).
+- core_simd_intersection_hits_lanes: hits a nivel de lanes SIMD (cuántos lanes tuvieron intersección).
 
-core_simd_intersection_misses_lanes: lanes que no encontraron intersección.
+- core_simd_intersection_misses_lanes: lanes que no encontraron intersección.
 
-core_lambertian_calls: llamadas al shader/BSDF lambertiano.
+- core_lambertian_calls: llamadas al shader/BSDF lambertiano.
 
-core_metal_calls: llamadas al material metálico.
+- core_metal_calls: llamadas al material metálico.
 
-core_dielectric_calls: llamadas al material dieléctrico.
+- core_dielectric_calls: llamadas al material dieléctrico.
 
-core_dielectric_reflect: veces que la ruta dieléctrica resultó en reflexión.
+- core_dielectric_reflect: veces que la ruta dieléctrica resultó en reflexión.
 
-core_dielectric_refract: veces que la ruta dieléctrica resultó en refracción.
+- core_dielectric_refract: veces que la ruta dieléctrica resultó en refracción.
 
 
 Con estos contadores se puede analizar:
@@ -407,7 +404,7 @@ Desde raytracer/ (usa el binario release por defecto):
 python3 scripts/run_with_perf.py config/neon_simple.json
 ```
 
-Uso con varias cnofigiraciones de corridas:
+Uso con varias configuraciones de corridas:
 
 ```bash
 python3 scripts/run_with_perf.py config/multiple_runs.json

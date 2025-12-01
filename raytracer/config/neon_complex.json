@@ -2,11 +2,11 @@
     "runs": [
       {
         "backend": "neon",
-        "scene": "simple",
-        "image_width": 400,
+        "scene": "many_spheres",
+        "image_width": 1920,
         "aspect_ratio": 1.7777778,
-        "samples_per_pixel": 100,
-        "max_depth": 50,
+        "samples_per_pixel": 250,
+        "max_depth": 100,
         "scene_seed": 3526
       }
     ]

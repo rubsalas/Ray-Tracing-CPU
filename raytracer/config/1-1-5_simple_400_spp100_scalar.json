@@ -1,7 +1,7 @@
 {
     "runs": [
       {
-        "backend": "neon",
+        "backend": "scalar",
         "scene": "simple",
         "image_width": 400,
         "aspect_ratio": 1.7777778,
@@ -11,4 +11,3 @@
       }
     ]
   }
-  
