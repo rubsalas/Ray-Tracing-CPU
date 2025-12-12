@@ -4,7 +4,7 @@ perf_compare.py
 
 High-level purpose:
 -------------------
-This script is responsible for orchestrating paired runs of the ray tracer
+This script is responsible for orchestrating *paired* runs of the ray tracer
 with two backends (currently: "scalar" and "neon"), wrapping each execution
 under `perf stat`, and then comparing all collected metrics (both high-level
 ray tracer metrics and microarchitectural metrics from perf).
@@ -35,8 +35,9 @@ Current implementation status:
 - Task 1: CLI definition and basic skeleton (DONE).
 - Task 2: Meta-config loading, validation, label handling, and internal
           representation of logical runs (DONE).
+- Task 3: Backend-specific config generation (scalar/neon) and temporary
+          file tracking (DONE).
 - Next tasks will add:
-    * backend-specific JSON generation,
     * perf execution,
     * metrics parsing,
     * comparison report generation.
@@ -45,9 +46,20 @@ Current implementation status:
 import argparse
 import json
 import sys
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Backends that will be compared for each logical run. The design keeps this
+# as a dedicated constant so it is easy to extend in the future (e.g., adding
+# a "simd" or "gpu" backend without rewriting the core logic).
+BACKENDS: List[str] = ["scalar", "neon"]
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +103,28 @@ class LogicalRun:
     config_data: Dict[str, Any]
     meta_config_path: Path
     index: int
+
+
+@dataclass
+class BackendRun:
+    """
+    Represents a concrete run configuration for a specific backend.
+
+    While LogicalRun is backend-agnostic, BackendRun ties together:
+        - The original LogicalRun (for context, label, meta-config origin).
+        - The chosen backend (e.g., "scalar" or "neon").
+        - The path to the backend-specific JSON config file that will be
+          passed directly to the ray tracer binary.
+
+    This abstraction is useful because:
+        - The execution layer (perf + ray tracer) can simply iterate over
+          BackendRun instances.
+        - Later, we can attach additional per-backend metadata (run_id,
+          metrics paths, perf paths, etc.) if needed.
+    """
+    logical_run: LogicalRun
+    backend: str
+    config_path: Path
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +366,7 @@ def load_meta_config(path: Path) -> List[LogicalRun]:
                 "max_depth": 50,
                 "scene_seed": 3526,
                 "label": "simple_400x225_spp10_seed3526",   # optional
-                "backend": "scalar"                         # will be ignored
+                "backend": "scalar"                          # will be ignored
             },
             ...
         ]
@@ -450,6 +484,101 @@ def load_meta_config(path: Path) -> List[LogicalRun]:
 
 
 # ---------------------------------------------------------------------------
+# Backend-specific config generation
+# ---------------------------------------------------------------------------
+
+def generate_backend_configs(
+    logical_runs: List[LogicalRun],
+) -> Tuple[List[BackendRun], List[Path]]:
+    """
+    For each LogicalRun, generate one backend-specific JSON config per backend
+    in BACKENDS (currently: scalar and neon).
+
+    The generated JSON has the structure:
+        {
+            "run": [
+                { ...original_entry_fields..., "backend": "<backend>" }
+            ]
+        }
+
+    and is written to a file located in the same directory as the originating
+    meta-config, using the following naming scheme:
+
+        <meta_stem>_<label>_<backend>.json
+
+    Example:
+    --------
+    If the meta-config is:
+        config/exp_simple.json
+    and the logical run has:
+        label = "simple_400x226_spp10_seed3526"
+
+    then the generated configs will be:
+        config/exp_simple_simple_400x226_spp10_seed3526_scalar.json
+        config/exp_simple_simple_400x226_spp10_seed3526_neon.json
+
+    Returns:
+    --------
+    backend_runs:
+        A list of BackendRun instances describing each concrete backend
+        configuration (including the path to the generated JSON file).
+
+    temp_files:
+        A list of Paths to all generated JSON files. This is useful for
+        implementing the --delete-temp behavior later, so that the main
+        function can remove them at the end if requested.
+    """
+    backend_runs: List[BackendRun] = []
+    temp_files: List[Path] = []
+
+    for lr in logical_runs:
+        meta_dir = lr.meta_config_path.parent
+        meta_stem = lr.meta_config_path.stem
+
+        for backend in BACKENDS:
+            # Create a deep copy of the logical run's config so that we can
+            # inject the backend field without mutating the original.
+            config_entry = deepcopy(lr.config_data)
+            config_entry["backend"] = backend
+
+            config_wrapper = {"run": [config_entry]}
+
+            # Build a deterministic filename that ties together:
+            #   - the original meta-config name (stem),
+            #   - the logical run label,
+            #   - the backend name.
+            # This makes it easy to understand where each generated file came
+            # from when browsing the config directory.
+            filename = f"{meta_stem}_{lr.label}_{backend}.json"
+            config_path = meta_dir / filename
+
+            # Write the backend-specific config to disk as JSON.
+            try:
+                with config_path.open("w", encoding="utf-8") as f:
+                    json.dump(config_wrapper, f, indent=2)
+            except OSError as e:
+                print(
+                    f"[ERROR] Failed to write backend config {config_path}: {e}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            # Track this config as a temporary file that can be deleted later
+            # if the user passes --delete-temp.
+            temp_files.append(config_path)
+
+            backend_runs.append(
+                BackendRun(
+                    logical_run=lr,
+                    backend=backend,
+                    config_path=config_path,
+                )
+            )
+
+    return backend_runs, temp_files
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -463,12 +592,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     - Resolve and normalize key paths (binary, runs-dir, perf-dir).
     - Perform basic sanity checks (e.g., binary existence).
     - Load meta-config JSON files into a list of LogicalRun objects.
+    - Generate backend-specific JSON configs (scalar + neon) for each
+      LogicalRun and keep track of them as temporary files.
     - Print a summary of:
         * The global configuration.
         * The logical runs discovered (one label per run).
+        * The backend-specific config files that were generated.
 
     The actual logic for:
-        * generating backend-specific configs,
         * running the ray tracer under perf,
         * parsing metrics and perf outputs, and
         * writing comparison reports
@@ -515,6 +646,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         per_file_counts[cfg_path] = len(logical_runs)
 
     # ------------------------------------------------------------------
+    # Generate backend-specific JSON configs (scalar + neon)
+    # ------------------------------------------------------------------
+    backend_runs, temp_files = generate_backend_configs(all_logical_runs)
+
+    # ------------------------------------------------------------------
     # Print configuration summary
     # ------------------------------------------------------------------
     print("[INFO] perf_compare.py configuration")
@@ -542,11 +678,21 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     print(f"[INFO] Total logical runs: {total_runs}")
     print()
-    print("[INFO] Meta-config loading and logical run setup complete.")
+
+    print("[INFO] Generated backend-specific configs:")
+    for br in backend_runs:
+        print(
+            f"  label={br.logical_run.label:<40} "
+            f"backend={br.backend:<6} "
+            f"config={br.config_path}"
+        )
+
+    print()
+    print("[INFO] Backend config generation complete.")
     print("[INFO] Next steps (to be implemented):")
-    print("       - Generate backend-specific configs (scalar/neon).")
     print("       - Run each backend under perf and collect metrics.")
     print("       - Build comparison reports (text and optional CSV).")
+    print("       - Optionally delete temporary files if --delete-temp is set.")
 
 
 if __name__ == "__main__":
