@@ -1,0 +1,22 @@
+{
+    "run": [
+      {
+        "scene": "simple",
+        "image_width": 400,
+        "aspect_ratio": 1.7777778,
+        "samples_per_pixel": 10,
+        "max_depth": 50,
+        "scene_seed": 3526,
+        "label": "simple_400x226_spp10_seed3526",
+        "backend": "scalar"
+      },
+      {
+        "scene": "many_spheres",
+        "image_width": 600,
+        "aspect_ratio": 1.7777778,
+        "samples_per_pixel": 50,
+        "max_depth": 50,
+        "scene_seed": 1234
+      }
+    ]
+  }
