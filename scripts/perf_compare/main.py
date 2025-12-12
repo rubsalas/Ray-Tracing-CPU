@@ -24,7 +24,11 @@ from .cli import parse_args
 from .meta_config import load_meta_config
 from .backend_configs import generate_backend_configs
 from .perf_runner import run_all_with_perf
+from .metrics_parser import collect_highlevel_metrics
+from .compare import build_highlevel_comparisons
+from .report import write_comparison_reports
 from .models import LogicalRun, BackendRun, RunResult
+
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -146,6 +150,29 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print(f"[WARN] Failed to delete temp perf file {p}: {e}", file=sys.stderr)
 
     # ------------------------------------------------------------------
+    # Parse high-level metrics and build scalar vs neon comparisons
+    # ------------------------------------------------------------------
+    comparisons_by_label = {}
+
+    if run_results_list:
+        print()
+        print("[INFO] Parsing high-level metrics from metrics_*.txt...")
+        highlevel = collect_highlevel_metrics(run_results_list)
+
+        print("[INFO] Building scalar vs NEON comparisons for high-level metrics...")
+        comparisons_by_label = build_highlevel_comparisons(highlevel)
+
+        reports_dir = Path("scripts/perf_compare/reports").resolve()
+        write_comparison_reports(
+            comparisons_by_label=comparisons_by_label,
+            output_dir=reports_dir,
+            generate_csv=args.csv,
+        )
+    else:
+        print()
+        print("[WARN] No RunResult entries recorded; skipping metric comparison and report generation.")
+
+    # ------------------------------------------------------------------
     # Print configuration and results summary
     # ------------------------------------------------------------------
     print()
@@ -197,13 +224,16 @@ def main(argv: Optional[List[str]] = None) -> None:
                     f"perf={rr.perf_file.name}"
                 )
 
+    if comparisons_by_label:
+        print()
+        print("[INFO] High-level metric comparison reports generated under:")
+        print(f"       {Path('scripts/perf_compare/reports').resolve()}")
+    else:
+        print()
+        print("[INFO] No high-level comparison reports were generated.")
+
     print()
-    print("[INFO] Perf execution and result mapping complete.")
-    print("[INFO] Next steps (to be implemented):")
-    print("       - Parse ray tracer metrics_*.txt into structured data.")
-    print("       - Compare scalar vs neon metrics per label.")
-    print("       - Generate text and optional CSV comparison reports "
-          "under scripts/perf_compare/.")
+    print("[INFO] perf_compare pipeline complete.")
 
 
 if __name__ == "__main__":

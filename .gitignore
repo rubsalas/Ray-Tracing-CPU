@@ -17,7 +17,7 @@ target
 # image generated
 *.ppm
 
-# No incluir el folder de los outputs
+# No incluir el folder de los outputs de Rust
 output
 runs
 perf_metrics
@@ -82,3 +82,7 @@ venv.bak/
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #   you could uncomment the following to ignore the entire vscode folder
 .vscode/
+
+# No incluir el folder de los outputs de Python
+perf_runs
+reports

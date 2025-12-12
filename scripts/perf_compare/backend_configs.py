@@ -17,7 +17,7 @@ def generate_backend_configs(
 
     The generated JSON has the structure:
         {
-            "run": [
+            "runs": [
                 { ...original_entry_fields..., "backend": "<backend>" }
             ]
         }
@@ -41,22 +41,11 @@ def generate_backend_configs(
         label = "simple_400x226_spp10_seed3526"
 
     and output_dir is:
-        config/
+        raytracer/config/
 
     then the generated configs will be:
-        config/exp_simple_meta_simple_400x226_spp10_seed3526_scalar.json
-        config/exp_simple_meta_simple_400x226_spp10_seed3526_neon.json
-
-    Returns:
-    --------
-    backend_runs:
-        A list of BackendRun instances describing each concrete backend
-        configuration (including the path to the generated JSON file).
-
-    temp_files:
-        A list of Paths to all generated JSON files. This is useful for
-        implementing the --delete-temp behavior later, so that the main
-        function can remove them at the end if requested.
+        raytracer/config/exp_simple_meta_simple_400x226_spp10_seed3526_scalar.json
+        raytracer/config/exp_simple_meta_simple_400x226_spp10_seed3526_neon.json
     """
     backend_runs: List[BackendRun] = []
     temp_files: List[Path] = []
@@ -72,16 +61,15 @@ def generate_backend_configs(
         sys.exit(1)
 
     for lr in logical_runs:
-        # meta_stem comes from the original meta-config file name.
         meta_stem = lr.meta_config_path.stem
 
         for backend in BACKENDS:
-            # Create a deep copy of the logical run's config so that we can
-            # inject the backend field without mutating the original.
+            # Deep copy of the logical run config so we don't mutate the original.
             config_entry = deepcopy(lr.config_data)
             config_entry["backend"] = backend
 
-            config_wrapper = {"run": [config_entry]}
+            # 🔹 IMPORTANT: the ray tracer expects "runs", not "run"
+            config_wrapper = {"runs": [config_entry]}
 
             filename = f"{meta_stem}_{lr.label}_{backend}.json"
             config_path = output_dir / filename

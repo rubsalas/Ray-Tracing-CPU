@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -110,3 +110,62 @@ class RunResult:
     run_id: str
     metrics_file: Path
     perf_file: Path
+
+@dataclass
+class ParsedMetrics:
+    """
+    Parsed content of a metrics_*.txt file.
+
+    numeric:
+        Dictionary of numeric metrics parsed as floats. Keys are metric names
+        (e.g. 'render_duration_ms', 'pps', 'rays_traced'), values are floats.
+
+    meta:
+        Dictionary of non-numeric or descriptive fields (e.g. 'run_id',
+        'backend', 'scene_name', etc.). These are kept as strings and are not
+        used directly in numeric comparisons, but may be useful for debugging
+        or future reporting.
+    """
+    numeric: Dict[str, float]
+    meta: Dict[str, str]
+
+
+@dataclass
+class MetricComparison:
+    """
+    Comparison of a single numeric metric between scalar and neon backends
+    for a given logical run label.
+
+    Fields:
+    -------
+    metric_name:
+        Name of the metric (e.g. 'render_duration_ms', 'pps').
+
+    scalar_value:
+        Numeric value from the scalar run, if available. None if the metric
+        was missing in scalar.
+
+    neon_value:
+        Numeric value from the neon run, if available. None if the metric
+        was missing in neon.
+
+    diff_neon_minus_scalar:
+        Difference neon - scalar, if both values are available. None otherwise.
+
+    ratio_neon_over_scalar:
+        Ratio neon / scalar, if scalar_value is non-zero and both values are
+        available. None otherwise.
+
+    better:
+        Which backend looks "better" according to simple heuristics:
+            - 'scalar'
+            - 'neon'
+            - 'tie'
+            - 'n/a' (not applicable or unknown trend)
+    """
+    metric_name: str
+    scalar_value: Optional[float]
+    neon_value: Optional[float]
+    diff_neon_minus_scalar: Optional[float]
+    ratio_neon_over_scalar: Optional[float]
+    better: str

@@ -73,12 +73,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-r",
         "--runs-dir",
-        default="raytracer/runs",
+        default="runs",
         help=(
-            "Directory where the ray tracer writes its metrics_*.txt files. "
-            "Default: raytracer/runs"
+            "Directory where the ray tracer writes its metrics files "
+            "(metrics_*.txt). Default: runs"
         ),
     )
+
 
     parser.add_argument(
         "--perf-dir",
