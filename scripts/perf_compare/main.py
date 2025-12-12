@@ -5,14 +5,15 @@ This module wires together:
     - CLI parsing (cli.parse_args),
     - meta-config loading (meta_config.load_meta_config),
     - backend-specific config generation (backend_configs.generate_backend_configs),
+    - perf execution and metrics mapping (perf_runner.run_all_with_perf),
 
 and prints a detailed summary.
 
 Later tasks will extend this main entry point to:
-    - Run each backend under perf,
-    - Parse high-level and microarchitectural metrics,
+    - Parse high-level ray tracer metrics,
+    - Compare scalar vs neon per logical run,
     - Emit comparison reports (text + optional CSV),
-    - Optionally delete temporary files (--delete-temp).
+    - Write all outputs under scripts/perf_compare/.
 """
 
 import sys
@@ -22,7 +23,8 @@ from typing import Dict, List, Optional
 from .cli import parse_args
 from .meta_config import load_meta_config
 from .backend_configs import generate_backend_configs
-from .models import LogicalRun, BackendRun
+from .perf_runner import run_all_with_perf
+from .models import LogicalRun, BackendRun, RunResult
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -32,15 +34,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     Current responsibilities:
     -------------------------
     - Parse CLI arguments.
-    - Resolve and normalize key paths (binary, runs-dir, perf-dir).
+    - Resolve and normalize key paths (binary, runs-dir, perf-dir, rust-config-dir).
     - Perform basic sanity checks (e.g., binary existence).
     - Load meta-config JSON files into a list of LogicalRun objects.
-    - Generate backend-specific JSON configs (scalar + neon) for each
-      LogicalRun and keep track of them as temporary files.
+    - Generate backend-specific JSON configs (scalar + neon) under raytracer/config/.
+    - Run perf for each backend config, collect metrics and perf outputs, and
+      build a mapping of results per logical label and backend.
+    - Optionally delete temporary files (--delete-temp).
     - Print a summary of:
-        * The global configuration.
-        * The logical runs discovered (one label per run).
-        * The backend-specific config files that were generated.
+        * Global configuration.
+        * Logical runs discovered (labels, indices).
+        * Backend-specific configs generated.
+        * Perf results (run_id per label/backend).
     """
     if argv is None:
         argv = sys.argv[1:]
@@ -48,20 +53,26 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args()
 
     # All these paths are resolved relative to the current working directory,
-    # which is expected to be the repository root that contains both
+    # which is expected to be the *repository root* that contains both
     # 'raytracer/' and 'scripts/'.
     binary_path = Path(args.binary).resolve()
     runs_dir = Path(args.runs_dir).resolve()
-    perf_dir = Path(args.perf_dir).resolve() if args.perf_dir else runs_dir
+
+    # Perf directory:
+    # By default we keep all perf-related outputs under scripts/perf_compare/perf_runs
+    # so that everything produced by perf_compare stays inside scripts/perf_compare/.
+    if args.perf_dir:
+        perf_dir = Path(args.perf_dir).resolve()
+    else:
+        perf_dir = Path("scripts/perf_compare/perf_runs").resolve()
+
     config_paths = [Path(c).resolve() for c in args.configs]
 
-    # 🔹 NUEVO: directorio de configs del raytracer Rust
-    # Asumimos layout:
+    # Rust config directory (where the ray tracer expects its JSON configs).
+    # Layout:
     #   <root>/
     #     raytracer/
     #       config/
-    #     scripts/
-    #
     rust_config_dir = Path("raytracer/config").resolve()
 
     if not binary_path.exists():
@@ -93,15 +104,51 @@ def main(argv: Optional[List[str]] = None) -> None:
     # Generate backend-specific JSON configs (scalar + neon) under raytracer/config/
     # ------------------------------------------------------------------
     backend_runs: List[BackendRun]
-    temp_files: List[Path]
-    backend_runs, temp_files = generate_backend_configs(
+    temp_config_files: List[Path]
+    backend_runs, temp_config_files = generate_backend_configs(
         all_logical_runs,
         rust_config_dir,
     )
 
     # ------------------------------------------------------------------
-    # Print configuration summary
+    # Run perf for each backend config and collect results
     # ------------------------------------------------------------------
+    run_results_list: List[RunResult]
+    run_results_map: Dict[str, Dict[str, RunResult]]
+    perf_temp_files: List[Path]
+
+    run_results_list, run_results_map, perf_temp_files = run_all_with_perf(
+        perf_cmd=args.perf,
+        binary_path=binary_path,
+        runs_dir=runs_dir,
+        perf_dir=perf_dir,
+        backend_runs=backend_runs,
+    )
+
+    # ------------------------------------------------------------------
+    # Optionally delete temporary files (--delete-temp)
+    # ------------------------------------------------------------------
+    if args.delete_temp:
+        print("[INFO] --delete-temp: removing temporary files...")
+        # Backend-specific JSON configs in raytracer/config/
+        for p in temp_config_files:
+            try:
+                p.unlink()
+                print(f"[INFO] Deleted temp config file: {p}")
+            except OSError as e:
+                print(f"[WARN] Failed to delete temp config file {p}: {e}", file=sys.stderr)
+        # perf_tmp_*.txt files in perf_dir
+        for p in perf_temp_files:
+            try:
+                p.unlink()
+                print(f"[INFO] Deleted temp perf file: {p}")
+            except OSError as e:
+                print(f"[WARN] Failed to delete temp perf file {p}: {e}", file=sys.stderr)
+
+    # ------------------------------------------------------------------
+    # Print configuration and results summary
+    # ------------------------------------------------------------------
+    print()
     print("[INFO] perf_compare configuration")
     print(f"  Binary path       : {binary_path}")
     print(f"  Runs directory    : {runs_dir}")
@@ -124,11 +171,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         for lr in all_logical_runs:
             if lr.meta_config_path == cfg_path:
                 print(f"      * label: {lr.label} (index {lr.index})")
-
     print(f"[INFO] Total logical runs: {total_runs}")
-    print()
 
-    print("[INFO] Generated backend-specific configs:")
+    print()
+    print("[INFO] Generated backend-specific configs (stored in raytracer/config/):")
     for br in backend_runs:
         print(
             f"  label={br.logical_run.label:<40} "
@@ -137,11 +183,27 @@ def main(argv: Optional[List[str]] = None) -> None:
         )
 
     print()
-    print("[INFO] Backend config generation complete.")
+    print("[INFO] Perf execution results (per label/backend):")
+    if not run_results_map:
+        print("  [WARN] No RunResult entries recorded. Check warnings above.")
+    else:
+        for label, by_backend in run_results_map.items():
+            print(f"  label={label}")
+            for backend, rr in by_backend.items():
+                print(
+                    f"    backend={backend:<6} "
+                    f"run_id={rr.run_id} "
+                    f"metrics={rr.metrics_file.name} "
+                    f"perf={rr.perf_file.name}"
+                )
+
+    print()
+    print("[INFO] Perf execution and result mapping complete.")
     print("[INFO] Next steps (to be implemented):")
-    print("       - Run each backend under perf and collect metrics.")
-    print("       - Build comparison reports (text and optional CSV).")
-    print("       - Optionally delete temporary files if --delete-temp is set.")
+    print("       - Parse ray tracer metrics_*.txt into structured data.")
+    print("       - Compare scalar vs neon metrics per label.")
+    print("       - Generate text and optional CSV comparison reports "
+          "under scripts/perf_compare/.")
 
 
 if __name__ == "__main__":

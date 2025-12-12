@@ -76,3 +76,37 @@ class BackendRun:
     logical_run: LogicalRun
     backend: str
     config_path: Path
+
+
+@dataclass
+class RunResult:
+    """
+    Represents the outcome of executing a BackendRun under perf.
+
+    Fields:
+    -------
+    logical_run:
+        The original logical run from which this backend execution was derived.
+
+    backend:
+        The backend used for this run ("scalar", "neon", etc.).
+
+    run_id:
+        The run_id parsed from the ray tracer metrics file. This is the key
+        that ties together:
+            - metrics_*.txt (ray tracer metrics)
+            - perf_<run_id>.txt (perf metrics + derived metrics)
+
+    metrics_file:
+        Path to the metrics_*.txt file produced by the ray tracer.
+
+    perf_file:
+        Path to the perf_<run_id>.txt file produced by this tool, which
+        contains raw perf output plus a block of derived microarchitectural
+        metrics.
+    """
+    logical_run: LogicalRun
+    backend: str
+    run_id: str
+    metrics_file: Path
+    perf_file: Path
